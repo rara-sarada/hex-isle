@@ -127,5 +127,28 @@ input, select { font: inherit; padding: 7px 10px; border-radius: 10px; border: 2
 }
 @media (max-width: 600px) {
   #btnCost { bottom: auto; top: 120px; left: auto; right: 10px; }
-  #costCard { bottom: auto; top: 155px; left: auto; right: 10px; }
+  #costCard { bottom: auto; top: 200px; left: auto; right: 10px; }
 }
+
+/* ---------- 演出 ---------- */
+#btnSound { position: absolute; left: 130px; bottom: 10px; }
+#bigNum { position: fixed; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(.3); font: 900 140px/1 Georgia, serif; color: #fff;
+  text-shadow: 0 6px 0 #a85e17, 0 12px 30px rgba(0,0,0,.5); opacity: 0; pointer-events: none; z-index: 15; }
+#bigNum.hot { color: #ffdede; text-shadow: 0 6px 0 #c62828, 0 12px 30px rgba(0,0,0,.5); }
+#bigNum.seven { color: #fff; text-shadow: 0 6px 0 #5a0f0f, 0 0 40px #ff3030; }
+#bigNum.show { animation: bignum 1.3s cubic-bezier(.2,1.6,.4,1) forwards; }
+@keyframes bignum { 0% { opacity: 0; transform: translate(-50%,-50%) scale(.3) rotate(-15deg); } 20% { opacity: 1; transform: translate(-50%,-50%) scale(1.1) rotate(3deg); }
+  35% { transform: translate(-50%,-50%) scale(1) rotate(0); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%,-70%) scale(.9); } }
+#banner { position: fixed; left: 50%; top: 26%; transform: translate(-50%, -50%); pointer-events: none; z-index: 14; opacity: 0; text-align: center;
+  background: linear-gradient(90deg, transparent, var(--bc, #d9822b) 15%, var(--bc, #d9822b) 85%, transparent); color: #fff; padding: 10px 90px; }
+#banner .bt { font-size: 34px; font-weight: 900; letter-spacing: 3px; text-shadow: 0 3px 0 rgba(0,0,0,.35); }
+#banner .bs { font-size: 15px; opacity: .95; }
+#banner.show { animation: banner 2s ease forwards; }
+@keyframes banner { 0% { opacity: 0; transform: translate(-150%, -50%); } 15% { opacity: 1; transform: translate(-50%, -50%); }
+  80% { opacity: 1; transform: translate(-50%, -50%); } 100% { opacity: 0; transform: translate(50%, -50%); } }
+#flash { position: fixed; inset: 0; pointer-events: none; z-index: 13; opacity: 0; box-shadow: inset 0 0 180px 60px rgba(220,30,30,.85); }
+#flash.show { animation: flash 1.2s ease-out forwards; }
+@keyframes flash { 0% { opacity: 0; } 10% { opacity: 1; } 30% { opacity: .5; } 45% { opacity: .9; } 100% { opacity: 0; } }
+.rc.bump { animation: bump .7s cubic-bezier(.2,1.8,.4,1) .9s both; }
+@keyframes bump { 0% { transform: translateY(0) scale(1); } 40% { transform: translateY(-16px) scale(1.15); box-shadow: 0 0 20px 4px #ffe27a; } 100% { transform: none; } }
+@media (max-width: 600px) { #bigNum { font-size: 96px; } #banner .bt { font-size: 22px; } #banner { padding: 8px 40px; } #btnSound { left: auto; right: 10px; top: 160px; bottom: auto; } }
