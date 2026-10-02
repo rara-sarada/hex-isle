@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>HEX ISLE ～開拓の島～</title>
+<meta name="description" content="ブラウザで遊べる3D島開拓ボードゲーム（オンライン対戦対応）">
+<link rel="stylesheet" href="css/style.css">
+<script src="js/vendor/peerjs.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="scene"></div>
+
+<!-- メニュー -->
+<section id="menu" class="screen">
+  <div class="card menu-card">
+    <h1>HEX ISLE<small>～開拓の島～</small></h1>
+    <p class="sub">資源を集めて道を伸ばし、町を広げよう。先に10点を取った人の勝ち！</p>
+    <label>名前 <input id="nameInput" maxlength="12" placeholder="なまえ"></label>
+    <div class="menu-row">
+      <button id="btnCreate" class="primary">🏝️ 部屋を作る</button>
+    </div>
+    <div class="menu-row">
+      <input id="codeInput" maxlength="5" placeholder="部屋コード" style="text-transform:uppercase">
+      <button id="btnJoin">🚪 参加する</button>
+    </div>
+    <div class="menu-row">
+      <select id="localCount"><option value="2">2人</option><option value="3" selected>3人</option><option value="4">4人</option></select>
+      <button id="btnLocal">🎮 1台で遊ぶ（交代制）</button>
+    </div>
+    <div id="resumeBox" class="menu-row hidden"><button id="btnResume">↩️ 前回の部屋を再開（ホスト）</button></div>
+    <p id="menuMsg" class="msg"></p>
+  </div>
+</section>
+
+<!-- ロビー -->
+<section id="lobby" class="screen hidden">
+  <div class="card menu-card">
+    <h2>ロビー</h2>
+    <div class="code-box">部屋コード <b id="roomCode">-----</b></div>
+    <div class="menu-row"><input id="inviteUrl" readonly><button id="btnCopy">コピー</button></div>
+    <ul id="seatList"></ul>
+    <p id="lobbyMsg" class="msg">接続中…</p>
+    <div class="menu-row"><button id="btnStart" class="primary hidden">ゲーム開始</button><button id="btnLeave">戻る</button></div>
+  </div>
+</section>
+
+<!-- ゲームHUD -->
+<section id="hud" class="hidden">
+  <div id="players"></div>
+  <div id="status"></div>
+  <div id="sidebar">
+    <div id="log"></div>
+    <form id="chatForm"><input id="chatInput" placeholder="チャット" maxlength="80" autocomplete="off"><button>送信</button></form>
+  </div>
+  <div id="tradeBanner" class="hidden"></div>
+  <div id="bottom">
+    <div id="hand"></div>
+    <div id="devs"></div>
+    <div id="actions"></div>
+  </div>
+  <button id="btnCost" class="mini">📋 建設コスト</button>
+  <div id="costCard" class="hidden">
+    <div><b>街道</b> 🌲🧱</div>
+    <div><b>開拓地</b> 🌲🧱🐑🌾 <small>(1点)</small></div>
+    <div><b>都市</b> 🌾🌾⛰️⛰️⛰️ <small>(2点)</small></div>
+    <div><b>発展カード</b> 🐑🌾⛰️</div>
+    <hr>
+    <small>最長交易路(5本以上) +2点 ／ 最大騎士力(騎士3枚以上) +2点</small>
+  </div>
+</section>
+
+<div id="modal" class="hidden"><div class="card" id="modalBody"></div></div>
+<div id="toasts"></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
