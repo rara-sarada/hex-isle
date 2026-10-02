@@ -55,12 +55,18 @@ export class Host {
   _accept(conn) {
     conn.on('data', (msg) => {
       if (msg?.t === 'hello') {
-        let idx = this.seats.findIndex((s) => s.token === msg.token);
+        // 同じトークンでも「ホスト本人の席」や「いま接続中の席」は乗っ取らせない（同じブラウザの別タブ対策）
+        let idx = this.seats.findIndex((s) => s.token === msg.token && !s.local && !(s.connected && s.conn?.open && s.conn !== conn));
         if (idx < 0) {
           if (this.started) return conn.send({ t: 'reject', msg: 'ゲームはすでに始まっています' });
           if (this.seats.length >= 4) return conn.send({ t: 'reject', msg: '満員です（最大4人）' });
           idx = this.seats.length;
-          this.seats.push({ name: String(msg.name || 'プレイヤー').slice(0, 12), token: msg.token });
+          let tok = String(msg.token || '');
+          if (!tok || this.seats.some((s) => s.token === tok)) {
+            tok = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            conn.send({ t: 'token', token: tok }); // 重複していたら新しいトークンを渡す
+          }
+          this.seats.push({ name: String(msg.name || 'プレイヤー').slice(0, 12), token: tok });
         }
         const seat = this.seats[idx];
         seat.conn = conn; seat.connected = true;

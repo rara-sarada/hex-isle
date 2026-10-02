@@ -35,8 +35,13 @@ const app = {
   chats: [],
 };
 
-let token = store.get('hexisle-token');
-if (!token) { token = Math.random().toString(36).slice(2) + Date.now().toString(36); store.set('hexisle-token', token); }
+// 席の識別トークンはタブごと（sessionStorage）。同じブラウザの別タブでも別プレイヤーとして入れる
+const tabStore = {
+  get(k) { try { return JSON.parse(sessionStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+let token = tabStore.get('hexisle-token');
+if (!token) { token = Math.random().toString(36).slice(2) + Date.now().toString(36); tabStore.set('hexisle-token', token); }
 $('nameInput').value = store.get('hexisle-name') || '';
 const urlRoom = new URLSearchParams(location.search).get('room');
 if (urlRoom) $('codeInput').value = urlRoom.toUpperCase();
@@ -92,6 +97,7 @@ $('btnResume').onclick = () => {
   startHost(saved.code, saved);
 };
 $('btnLeave').onclick = () => (location.href = location.pathname + location.search.replace(/[?&]room=[^&]*/, ''));
+$('btnRetry').onclick = () => { try { app.client?.peer.destroy(); } catch {} $('btnRetry').classList.add('hidden'); $('lobbyMsg').textContent = '部屋に接続中…'; connectClient(); };
 $('btnCopy').onclick = () => { $('inviteUrl').select(); navigator.clipboard?.writeText($('inviteUrl').value); toast('招待リンクをコピーしました', true); };
 $('btnCost').onclick = () => $('costCard').classList.toggle('hidden');
 document.addEventListener('click', (e) => { if (e.target.closest('button:not(:disabled)')) sfx('click'); }, true);
@@ -190,6 +196,13 @@ function startClient(code) {
   connectClient();
 }
 function connectClient() {
+  app.joined = false;
+  clearTimeout(app.joinTimer);
+  app.joinTimer = setTimeout(() => {
+    if (app.joined) return;
+    $('lobbyMsg').innerHTML = 'ホストに接続できません。<br>・部屋コードが正しいか／ホストがロビー画面を開いたままか確認<br>・会社/学校/一部モバイル回線ではP2P通信が遮断されることがあります（Wi-Fiを切り替えて再試行）';
+    $('btnRetry')?.classList.remove('hidden');
+  }, 15000);
   app.client = new Client(app.code, myName(), token, {
     onOpen: () => { $('lobbyMsg').textContent = 'ホストの開始を待っています'; },
     onError: (e) => { const t = peerErrorText(e); $('lobbyMsg').textContent = t; toast(t); },
@@ -199,9 +212,11 @@ function connectClient() {
         (b) => (b.querySelector('#re').onclick = () => { closeModal(); connectClient(); }));
     },
     onMessage: (m) => {
-      if (m.t === 'lobby') { app.lobbySeats = m.seats; app.me = m.you; renderLobby(); }
+      if (m.t === 'token') { token = m.token; tabStore.set('hexisle-token', token); }
+      else if (m.t === 'lobby') { app.joined = true; app.lobbySeats = m.seats; app.me = m.you; renderLobby(); }
       else if (m.t === 'reject') { $('lobbyMsg').textContent = m.msg; toast(m.msg); }
       else if (m.t === 'state') {
+        app.joined = true;
         app.me = m.you;
         app.seatsOnline = m.online;
         if (!app.v) enterGame();
