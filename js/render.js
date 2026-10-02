@@ -61,7 +61,11 @@ export class BoardRenderer {
     this.boardGroup = new THREE.Group();
     this.pieceGroup = new THREE.Group();
     this.markerGroup = new THREE.Group();
-    scene.add(this.boardGroup, this.pieceGroup, this.markerGroup);
+    this.fxGroup = new THREE.Group();
+    scene.add(this.boardGroup, this.pieceGroup, this.markerGroup, this.fxGroup);
+    this.fx = []; // 演出用パーティクル
+    this.shakeUntil = 0; this.shakeMag = 0;
+    this.onEvent = null; // (name, data) => 効果音など
 
     this.pieces = new Map(); // key -> object
     this.tweens = [];
@@ -116,6 +120,7 @@ export class BoardRenderer {
     const m = this._pickAt(e);
     if (m !== this.hovered) {
       this.hovered = m;
+      if (m) this.onEvent?.('hover');
       this.renderer.domElement.style.cursor = m ? 'pointer' : '';
     }
   }
@@ -181,7 +186,11 @@ export class BoardRenderer {
     if (rh !== this.robberHex) {
       const to = this._robberPos(rh);
       if (this.robberHex < 0) this.robber.position.copy(to);
-      else this._tween(this.robber, this.robber.position.clone(), to, 700, true);
+      else {
+        this.smoke(this.robber.position.clone());
+        this._tween(this.robber, this.robber.position.clone(), to, 700, true);
+        setTimeout(() => { this.smoke(to.clone()); this.puff(to.clone(), '#3a3a44', 14); this.shake(250, 0.05); }, 680);
+      }
       this.robberHex = rh;
     }
     const want = new Map();
@@ -210,6 +219,13 @@ export class BoardRenderer {
       if (this._initialized) {
         obj.position.copy(pos).add(new THREE.Vector3(0, 2.2, 0));
         this._tween(obj, obj.position.clone(), pos, 550, false, 'bounce');
+        // 最初の着地（約36%地点）で土煙と効果音
+        setTimeout(() => {
+          this.puff(pos.clone(), '#d9c7a0', p.kind === 'road' ? 8 : 14);
+          if (p.kind === 'city') { this.sparkle(pos.clone().add(new THREE.Vector3(0, 0.3, 0)), '#ffd75a', 26); this.shake(200, 0.03); }
+          if (p.kind === 'settlement') this.sparkle(pos.clone().add(new THREE.Vector3(0, 0.25, 0)), color, 12);
+          this.onEvent?.('land', { kind: p.kind, owner: p.owner });
+        }, 200);
       } else obj.position.copy(pos);
     }
     this._initialized = true;
@@ -272,6 +288,137 @@ export class BoardRenderer {
       const spin = new THREE.Vector3(rot[0] + Math.PI * 4, rot[1] + Math.PI * (2 + i), rot[2] + Math.PI * 4);
       this.tweens.push({ obj: d, from: start, to: end, t0: performance.now(), dur: 900, ease: 'bounce', rotFrom: spin, rotTo: new THREE.Vector3(...rot) });
     });
+    setTimeout(() => { this.dice.forEach((d) => this.puff(d.position.clone().setY(0.05), '#ffffff', 6)); this.onEvent?.('diceLand'); }, 330);
+  }
+
+  // ---------------------------------------------------------
+  // 演出（パーティクル・リング・浮かぶアイコン・画面揺れ）
+  // ---------------------------------------------------------
+  _spawn(mesh, life, vel, opts = {}) {
+    if (this.fx.length > 400) return;
+    this.fxGroup.add(mesh);
+    this.fx.push({ mesh, t0: performance.now(), life, vel, grav: opts.grav ?? 0, grow: opts.grow ?? 0, spin: opts.spin ?? null, fade: opts.fade ?? true, s0: mesh.scale.x });
+  }
+
+  puff(pos, color = '#d9c7a0', n = 12) {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(FXG.sphere, new THREE.MeshStandardMaterial({ color, transparent: true, opacity: 0.85, roughness: 1, depthWrite: false }));
+      const a = Math.random() * Math.PI * 2, sp = 0.6 + Math.random() * 0.8;
+      m.position.copy(pos).add(new THREE.Vector3(0, 0.03, 0));
+      m.scale.setScalar(0.03 + Math.random() * 0.03);
+      this._spawn(m, 500 + Math.random() * 300, new THREE.Vector3(Math.cos(a) * sp, 0.3 + Math.random() * 0.5, Math.sin(a) * sp), { grow: 2.2, grav: -1.5 });
+    }
+  }
+
+  sparkle(pos, color = '#ffe27a', n = 16) {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(FXG.star, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false, blending: THREE.AdditiveBlending }));
+      const a = Math.random() * Math.PI * 2, sp = 0.4 + Math.random() * 0.9;
+      m.position.copy(pos);
+      m.scale.setScalar(0.03 + Math.random() * 0.03);
+      this._spawn(m, 700 + Math.random() * 500, new THREE.Vector3(Math.cos(a) * sp, 1.2 + Math.random() * 1.4, Math.sin(a) * sp), { grav: -3, spin: new THREE.Vector3(4, 6, 3) });
+    }
+  }
+
+  smoke(pos) {
+    for (let i = 0; i < 14; i++) {
+      const m = new THREE.Mesh(FXG.sphere, new THREE.MeshStandardMaterial({ color: '#2b2b33', transparent: true, opacity: 0.7, roughness: 1, depthWrite: false }));
+      m.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.1 + Math.random() * 0.2, (Math.random() - 0.5) * 0.3));
+      m.scale.setScalar(0.06 + Math.random() * 0.05);
+      this._spawn(m, 900 + Math.random() * 500, new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.5 + Math.random() * 0.4, (Math.random() - 0.5) * 0.3), { grow: 1.6 });
+    }
+  }
+
+  ring(pos, color = '#fff2a8', delay = 0) {
+    setTimeout(() => {
+      const m = new THREE.Mesh(FXG.ring, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending }));
+      m.rotation.x = Math.PI / 2; m.rotation.z = Math.PI / 6;
+      m.position.copy(pos);
+      m.scale.setScalar(0.5);
+      this._spawn(m, 900, new THREE.Vector3(0, 0.15, 0), { grow: 1.4 });
+    }, delay);
+  }
+
+  floatIcon(pos, text, delay = 0) {
+    setTimeout(() => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 128;
+      const x = c.getContext('2d');
+      x.font = '92px sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.shadowColor = 'rgba(0,0,0,.45)'; x.shadowBlur = 10;
+      x.fillText(text, 64, 70);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }));
+      sp.renderOrder = 20;
+      sp.position.copy(pos);
+      sp.scale.setScalar(0.55);
+      this._spawn(sp, 1600, new THREE.Vector3(0, 0.9, 0));
+    }, delay);
+  }
+
+  // ダイスの出目に応じて産出したタイルを光らせ、資源アイコンを浮かべる
+  produce(state, sum, icons) {
+    const B = this.board;
+    let i = 0;
+    for (const h of B.hexes) {
+      if (h.num !== sum) continue;
+      const blocked = h.id === state.board.robber;
+      const pos = new THREE.Vector3(h.x, TOP + 0.05, h.z);
+      if (blocked) { this.smoke(pos.clone()); this.floatIcon(pos.clone().setY(TOP + 0.6), '🚫', 300); continue; }
+      const owners = h.vertices.map((v) => state.buildings[v]).filter(Boolean);
+      this.ring(pos.clone(), '#fff2a8', 350 + i * 120);
+      this.ring(pos.clone(), '#ffd75a', 550 + i * 120);
+      owners.forEach((bd, j) => {
+        const vtx = B.vertices[h.vertices.find((v) => state.buildings[v] === bd)];
+        const icon = icons[h.terrain];
+        if (!icon) return;
+        const p = new THREE.Vector3(h.x + (vtx.x - h.x) * 0.5, TOP + 0.4, h.z + (vtx.z - h.z) * 0.5);
+        this.floatIcon(p, icon, 450 + i * 120 + j * 90);
+        if (bd.type === 'city') this.floatIcon(p.clone().add(new THREE.Vector3(0.12, 0.12, 0)), icon, 550 + i * 120 + j * 90);
+      });
+      if (owners.length) setTimeout(() => this.sparkle(pos.clone().setY(TOP + 0.2), '#fff6c0', 10), 400 + i * 120);
+      i++;
+    }
+  }
+
+  confetti(ms = 4000) {
+    const colors = ['#e04545', '#3a78e0', '#f2f2f2', '#f09a28', '#5cc46a', '#ffd75a', '#c86be0'];
+    const end = performance.now() + ms;
+    const burst = () => {
+      for (let i = 0; i < 18; i++) {
+        const m = new THREE.Mesh(FXG.plane, new THREE.MeshBasicMaterial({ color: colors[Math.floor(Math.random() * colors.length)], side: THREE.DoubleSide, transparent: true, depthWrite: false }));
+        m.position.set((Math.random() - 0.5) * 9, 5 + Math.random() * 2, (Math.random() - 0.5) * 8);
+        m.scale.setScalar(0.08 + Math.random() * 0.06);
+        this._spawn(m, 3000, new THREE.Vector3((Math.random() - 0.5) * 0.6, -1.4 - Math.random(), (Math.random() - 0.5) * 0.6), { spin: new THREE.Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6), fade: false });
+      }
+      if (performance.now() < end) setTimeout(burst, 160);
+    };
+    burst();
+    // 花火
+    for (let k = 0; k < 6; k++) setTimeout(() => {
+      const p = new THREE.Vector3((Math.random() - 0.5) * 7, 2.5 + Math.random() * 1.5, (Math.random() - 0.5) * 6);
+      this.sparkle(p, colors[k % colors.length], 40);
+      this.onEvent?.('firework');
+    }, 300 + k * 550);
+  }
+
+  shake(ms = 400, mag = 0.12) {
+    this.shakeUntil = performance.now() + ms;
+    this.shakeMag = mag;
+  }
+
+  _tickFx(now, dt) {
+    this.fx = this.fx.filter((f) => {
+      const k = (now - f.t0) / f.life;
+      if (k >= 1) { this.fxGroup.remove(f.mesh); f.mesh.material.map?.dispose(); f.mesh.material.dispose(); return false; }
+      f.vel.y += f.grav * dt;
+      f.mesh.position.addScaledVector(f.vel, dt);
+      if (f.mesh.position.y < 0.02 && f.grav < 0 && !f.spin) f.mesh.position.y = 0.02;
+      if (f.grow) f.mesh.scale.setScalar(f.s0 * (1 + f.grow * k));
+      if (f.spin) { f.mesh.rotation.x += f.spin.x * dt; f.mesh.rotation.y += f.spin.y * dt; f.mesh.rotation.z += f.spin.z * dt; }
+      if (f.fade) f.mesh.material.opacity = (f.mesh.material.userData.o0 ??= f.mesh.material.opacity) * (1 - k * k);
+      return true;
+    });
   }
 
   focus(x, z) {
@@ -326,7 +473,24 @@ export class BoardRenderer {
       }
       return k < 1;
     });
+    const dt = Math.min(0.05, (now - (this._last || now)) / 1000);
+    this._last = now;
+    this._tickFx(now, dt);
     this.controls.update();
+    let off = null;
+    if (now < this.shakeUntil) {
+      const m = this.shakeMag * ((this.shakeUntil - now) / 400 + 0.3);
+      off = new THREE.Vector3((Math.random() - 0.5) * m, (Math.random() - 0.5) * m, (Math.random() - 0.5) * m);
+      this.camera.position.add(off);
+    }
     this.renderer.render(this.scene, this.camera);
+    if (off) this.camera.position.sub(off);
   }
 }
+
+const FXG = {
+  sphere: new THREE.IcosahedronGeometry(1, 0),
+  star: new THREE.OctahedronGeometry(1, 0),
+  ring: new THREE.TorusGeometry(0.75, 0.05, 6, 6),
+  plane: new THREE.PlaneGeometry(1, 0.6),
+};

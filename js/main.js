@@ -4,6 +4,7 @@
 import * as G from './game.js';
 import { BoardRenderer } from './render.js';
 import { Host, Client, randomCode } from './net.js';
+import { sfx, Sound } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const RES = G.RES;
@@ -15,6 +16,10 @@ const store = {
 
 const renderer = new BoardRenderer($('scene'));
 renderer.onPick = onPick;
+renderer.onEvent = (name, d) => {
+  if (name === 'land') sfx(d.kind === 'road' ? 'road' : d.kind);
+  else sfx(name);
+};
 
 const app = {
   role: null, // 'host' | 'client' | 'local'
@@ -41,6 +46,7 @@ if (store.get('hexisle-host')) $('resumeBox').classList.remove('hidden');
 // 共通UI
 // -------------------------------------------------------------
 function toast(t, ok = false) {
+  if (String(t).startsWith('⚠️')) sfx('error');
   const d = document.createElement('div');
   d.className = 'toast' + (ok ? ' ok' : '');
   d.textContent = t;
@@ -88,6 +94,10 @@ $('btnResume').onclick = () => {
 $('btnLeave').onclick = () => (location.href = location.pathname + location.search.replace(/[?&]room=[^&]*/, ''));
 $('btnCopy').onclick = () => { $('inviteUrl').select(); navigator.clipboard?.writeText($('inviteUrl').value); toast('招待リンクをコピーしました', true); };
 $('btnCost').onclick = () => $('costCard').classList.toggle('hidden');
+document.addEventListener('click', (e) => { if (e.target.closest('button:not(:disabled)')) sfx('click'); }, true);
+function soundLabel() { $('btnSound').textContent = Sound.enabled ? '🔊 音あり' : '🔇 音なし'; }
+$('btnSound').onclick = () => { Sound.setEnabled(!Sound.enabled); soundLabel(); };
+soundLabel();
 
 function inviteUrl(code) {
   const q = new URLSearchParams(location.search);
@@ -239,17 +249,81 @@ function enterGame() {
 }
 
 function receive(v) {
-  const prev = app.v;
+  let prev = app.v;
   app.v = v;
   const key = v.board.hexes.map((h) => h.terrain[0] + h.num).join('');
-  if (key !== app.boardKey) { app.boardKey = key; renderer.setBoard(v.board); app.lastRollSeq = v.rollSeq || 0; app.lastLogId = 0; $('log').innerHTML = ''; }
+  if (key !== app.boardKey) { app.boardKey = key; renderer.setBoard(v.board); app.lastRollSeq = v.rollSeq || 0; app.lastLogId = 0; $('log').innerHTML = ''; prev = null; }
   renderer.update(v);
-  if ((v.rollSeq || 0) !== app.lastRollSeq && v.dice) { app.lastRollSeq = v.rollSeq; renderer.rollDice(...v.dice); }
+  if ((v.rollSeq || 0) !== app.lastRollSeq && v.dice) { app.lastRollSeq = v.rollSeq; renderer.rollDice(...v.dice); diceFx(v); }
+  if (prev && prev.board.robber !== v.board.robber) sfx('robber');
+  if (prev) eventFx(prev, v);
   if (v._private && v.seq !== app.lastPrivSeq) { app.lastPrivSeq = v.seq; toast(v._private.t, true); }
   // 自分の手番が来たら通知
-  if (prev && v.current !== prev.current && v.current === app.me && app.role !== 'local' && v.phase === 'play') toast('あなたの番です！', true);
+  if (prev && v.current !== prev.current && v.phase === 'play' && prev.phase === 'play') {
+    if (app.role === 'local') { banner(`${v.players[v.current].name} の番`, v.players[v.current].color); sfx('myTurn'); }
+    else if (v.current === app.me) { banner('あなたの番！', v.players[app.me].color); sfx('myTurn'); }
+  }
   if (app.buildMode && !(v.current === app.me && v.step === 'main')) app.buildMode = null;
   renderHUD();
+}
+
+// -------------------------------------------------------------
+// 演出（効果音・バナー・数字ポップ）
+// -------------------------------------------------------------
+const TERRAIN_ICON = { forest: '🌲', hills: '🧱', pasture: '🐑', fields: '🌾', mountains: '⛰️' };
+
+function banner(text, color = '#d9822b', sub = '') {
+  const b = $('banner');
+  b.innerHTML = `<div class="bt">${esc(text)}</div>${sub ? `<div class="bs">${esc(sub)}</div>` : ''}`;
+  b.style.setProperty('--bc', color);
+  b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+  sfx('banner');
+}
+
+function diceFx(v) {
+  sfx('diceShake');
+  const sum = v.dice[0] + v.dice[1];
+  setTimeout(() => {
+    const n = $('bigNum');
+    n.textContent = sum;
+    n.className = sum === 7 ? 'seven' : (sum === 6 || sum === 8) ? 'hot' : '';
+    void n.offsetWidth; n.classList.add('show');
+    if (sum === 7) {
+      sfx('seven');
+      renderer.shake(600, 0.18);
+      const f = $('flash'); f.classList.remove('show'); void f.offsetWidth; f.classList.add('show');
+      setTimeout(() => banner('盗賊が現れた！', '#b03a2e', '手札8枚以上は半分捨てる'), 500);
+    } else {
+      renderer.produce(v, sum, TERRAIN_ICON);
+      const hit = v.board.hexes.filter((h) => h.num === sum && h.id !== v.board.robber && h.vertices.some((x) => v.buildings[x])).length;
+      if (hit) setTimeout(() => sfx('gain', hit + 1), 450);
+    }
+  }, 600);
+}
+
+function eventFx(prev, v) {
+  const fresh = v.log.filter((l) => l.id > (prev.log.at(-1)?.id ?? 0));
+  if (fresh.length > 12) return; // 再接続時などの大量ログでは鳴らさない
+  for (const { t } of fresh) {
+    if (t.includes('奪った')) sfx('steal');
+    else if (t.includes('騎士を使用')) { sfx('knight'); renderer.shake(250, 0.05); }
+    else if (t.includes('最長交易路を獲得') || t.includes('最大騎士力を獲得')) {
+      const name = t.replace(/^\S+\s/, '').split(' が ')[0];
+      setTimeout(() => { sfx('achievement'); banner(t.includes('最長') ? '🛤️ 最長交易路！' : '⚔️ 最大騎士力！', '#7a4a10', `${name} +2点`); }, 700);
+    }
+    else if (t.includes('交渉成立')) sfx('trade');
+    else if (t.includes('交渉を提案')) sfx('offer');
+    else if (t.includes('交易:')) sfx('trade');
+    else if (t.includes('発展カードを購入')) sfx('card');
+    else if (t.startsWith('🎁') || t.startsWith('💰') || t.includes('街道建設を使用')) sfx('magic');
+    else if (t.includes('初期配置完了')) { sfx('start'); banner('開拓スタート！'); }
+    else if (t.includes('の勝利')) {
+      setTimeout(() => { sfx('win'); renderer.confetti(5000); }, 400);
+    }
+  }
+  // 自分の手札が増えたカードを弾ませる
+  const a = prev.players[app.me]?.res, b = v.players[app.me]?.res;
+  if (a && b) app.bumpRes = RES.filter((r) => b[r] > a[r]);
 }
 
 function addChat(c) {
@@ -357,7 +431,8 @@ function renderHUD() {
 
   // 手札
   const colors = { wood: '#2f7a3a', brick: '#c06a3c', sheep: '#8fd16a', wheat: '#e8c64a', ore: '#8d8f96' };
-  $('hand').innerHTML = P.res ? RES.map((r) => `<div class="rc ${P.res[r] ? '' : 'zero'}" style="--c:${colors[r]}"><div class="i">${G.RES_ICON[r]}</div><div class="n">${P.res[r]}</div><div class="l">${G.RES_JP[r]}</div></div>`).join('') : '';
+  const bump = app.bumpRes || []; app.bumpRes = null;
+  $('hand').innerHTML = P.res ? RES.map((r) => `<div class="rc ${P.res[r] ? '' : 'zero'} ${bump.includes(r) ? 'bump' : ''}" style="--c:${colors[r]}"><div class="i">${G.RES_ICON[r]}</div><div class="n">${P.res[r]}</div><div class="l">${G.RES_JP[r]}</div></div>`).join('') : '';
 
   // 発展カード
   const myTurn = v.current === me && v.phase === 'play';
