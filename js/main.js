@@ -1,14 +1,17 @@
 // =============================================================
 // アプリ本体：画面遷移・HUD・入力 → アクション送信
 // =============================================================
-import * as G from './game.js?v=20261003154757';
-import { BoardRenderer } from './render.js?v=20261003154757';
-import { Host, Client, randomCode } from './net.js?v=20261003154757';
-import { sfx, Sound } from './audio.js?v=20261003154757';
-import { RULE_SECTIONS } from './rules.js?v=20261003154757';
+import * as G from './game.js?v=20261003160627';
+import { BoardRenderer } from './render.js?v=20261003160627';
+import { Host, Client, randomCode } from './net.js?v=20261003160627';
+import { sfx, Sound } from './audio.js?v=20261003160627';
+import { RULE_SECTIONS } from './rules.js?v=20261003160627';
 
 const $ = (id) => document.getElementById(id);
-const BUILD = '20261003154757';
+const BUILD = '20261003160627';
+// 手番の強調色はプレイヤー色に関係なく統一（白など見えにくい色を避ける）
+const TURN_COLOR = '#ff9f1a';
+const TURN_TEXT = '#d35400';
 
 // 予期しないエラーは画面に出す（黙って固まらないように）
 function showErr(msg) {
@@ -435,15 +438,15 @@ function applyState(v) {
   if (v._private && v.seq !== app.lastPrivSeq) { app.lastPrivSeq = v.seq; toast(v._private.t, true); }
   // 自分の手番が来たら通知
   if (prev && v.current !== prev.current && v.phase === 'play' && prev.phase === 'play') {
-    if (app.role === 'local') { banner(`${v.players[v.current].name} の番`, v.players[v.current].color); sfx('myTurn'); }
-    else if (v.current === app.me) { banner('あなたの番！', v.players[app.me].color); sfx('myTurn'); }
+    if (app.role === 'local') { banner(`${v.players[v.current].name} の番`, TURN_COLOR); sfx('myTurn'); }
+    else if (v.current === app.me) { banner('あなたの番！', TURN_COLOR); sfx('myTurn'); }
   }
   if (app.buildMode && !(v.current === app.me && v.step === 'main')) app.buildMode = null;
   // 自分が何かする必要がある間は、画面枠を光らせる＋タブ名で知らせる＋スマホを振動
   const mustAct = G.whoMustAct(v).includes(app.me) && v.phase !== 'ended';
   const wasMust = prev ? G.whoMustAct(prev).includes(app.me) && prev.phase !== 'ended' : false;
   document.body.classList.toggle('myturn', mustAct);
-  document.body.style.setProperty('--me', v.players[app.me]?.color || '#ffd75a');
+  document.body.style.setProperty('--me', TURN_COLOR);
   if (mustAct && !wasMust && app.role !== 'local') {
     try { navigator.vibrate?.([120, 80, 120]); } catch {}
     if (prev && v.step !== 'roll') sfx('myTurn');
@@ -627,7 +630,7 @@ function renderHUD() {
   const mustAct = G.whoMustAct(v).includes(me) && v.phase !== 'ended';
   const curP = v.players[v.current];
   $('status').innerHTML = (mustAct
-    ? `<div class="who" style="--pc:${v.players[me].color}">🎯 ${app.role === 'local' ? esc(v.players[me].name) + ' の番' : 'あなたの番'}</div>`
+    ? `<div class="who" style="--pc:${TURN_TEXT}">🎯 ${app.role === 'local' ? esc(v.players[me].name) + ' の番' : 'あなたの番'}</div>`
     : v.phase === 'ended' ? '' : `<div class="who wait" style="--pc:${curP.color}">⏳ <span class="dot" style="background:${curP.color}"></span>${esc(curP.name)} の番${online && !online[curP.id] ? '（📴切断中）' : ''}</div>`)
     + `<div class="what">${esc(statusText(v))}</div>` + hostSkipHtml(v, mustAct);
   $('status').classList.toggle('me', mustAct);
