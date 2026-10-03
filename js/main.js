@@ -5,6 +5,7 @@ import * as G from './game.js';
 import { BoardRenderer } from './render.js';
 import { Host, Client, randomCode } from './net.js';
 import { sfx, Sound } from './audio.js';
+import { RULE_SECTIONS } from './rules.js';
 
 const $ = (id) => document.getElementById(id);
 const RES = G.RES;
@@ -83,6 +84,7 @@ function show(id) {
   ['menu', 'lobby', 'hud'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
 }
 function modal(html, bind) {
+  $('modalBody').classList.remove('rules');
   $('modalBody').innerHTML = html;
   $('modal').classList.remove('hidden');
   bind?.($('modalBody'));
@@ -121,8 +123,22 @@ $('btnLeave').onclick = () => { store.del('hexisle-joined'); location.href = loc
 $('btnRetry').onclick = () => { $('btnRetry').classList.add('hidden'); $('lobbyMsg').textContent = '部屋に接続中…'; app.client?.reconnect(); };
 $('netBtn').onclick = () => { if (app.role === 'client') { app.client?.reconnect(); toast('再接続しています…', true); } else if (app.role === 'host') { publish(); toast('全員に最新の盤面を送りました', true); } };
 $('btnView').onclick = () => renderer.resetView();
+$('btnRules').onclick = () => openRules();
+$('btnRulesMenu').onclick = () => openRules();
+
+// ルールブック（章ごとのタブ）
+function openRules(id = RULE_SECTIONS[0].id) {
+  app.modalKind = 'rules';
+  const sec = RULE_SECTIONS.find((r) => r.id === id) || RULE_SECTIONS[0];
+  modal(`<div class="rhead"><h3>📖 ルールブック</h3><button id="rClose">✕ 閉じる</button></div>
+    <div class="rtabs">${RULE_SECTIONS.map((r) => `<button data-r="${r.id}" class="${r.id === sec.id ? 'on' : ''}">${r.title}</button>`).join('')}</div>
+    <div class="rbody"><h4>${sec.title}</h4>${sec.html}</div>`, (b) => {
+    b.querySelectorAll('[data-r]').forEach((x) => (x.onclick = () => openRules(x.dataset.r)));
+    b.querySelector('#rClose').onclick = () => closeModal();
+  });
+  $('modalBody').classList.add('rules');
+}
 $('btnCopy').onclick = () => { $('inviteUrl').select(); navigator.clipboard?.writeText($('inviteUrl').value); toast('招待リンクをコピーしました', true); };
-$('btnCost').onclick = () => $('costCard').classList.toggle('hidden');
 document.addEventListener('click', (e) => { if (e.target.closest('button:not(:disabled)')) sfx('click'); }, true);
 function soundLabel() { $('btnSound').textContent = Sound.enabled ? '🔊 音あり' : '🔇 音なし'; }
 $('btnSound').onclick = () => { Sound.setEnabled(!Sound.enabled); soundLabel(); };
@@ -548,6 +564,11 @@ function renderHUD() {
   // 手札
   const colors = { wood: '#2f7a3a', brick: '#c06a3c', sheep: '#8fd16a', wheat: '#e8c64a', ore: '#8d8f96' };
   const bump = app.bumpRes || []; app.bumpRes = null;
+  if (P.res) {
+    const n = G.resTotal(P.res);
+    const devN = (P.dev?.length || 0) + (P.newDev?.length || 0);
+    $('handInfo').innerHTML = `<div class="hn ${n >= 8 ? 'warn' : ''}"><b>${n}</b><span>枚</span></div><div class="hl">手札${n >= 8 ? '<br><em>7で半分捨て</em>' : ''}</div>${devN ? `<div class="hd">📜${devN}</div>` : ''}`;
+  } else $('handInfo').innerHTML = '';
   $('hand').innerHTML = P.res ? RES.map((r) => `<div class="rc ${P.res[r] ? '' : 'zero'} ${bump.includes(r) ? 'bump' : ''}" style="--c:${colors[r]}"><div class="i">${G.RES_ICON[r]}</div><div class="n">${P.res[r]}</div><div class="l">${G.RES_JP[r]}</div></div>`).join('') : '';
 
   // 発展カード
@@ -571,10 +592,10 @@ function renderHUD() {
     ? btn('aNew', '🔁 メニューへ', true, 'primary')
     : [
       btn('aRoll', '🎲 ダイスを振る', myTurn && v.step === 'roll', myTurn && v.step === 'roll' ? 'primary pulse' : ''),
-      btn('aRoad', '🛤️ 街道', main && has(G.COST.road) && P.roadsLeft > 0, app.buildMode === 'road' ? 'on' : ''),
-      btn('aSet', '🏠 開拓地', main && has(G.COST.settlement) && P.settlementsLeft > 0, app.buildMode === 'settlement' ? 'on' : ''),
-      btn('aCity', '🏰 都市', main && has(G.COST.city) && P.citiesLeft > 0, app.buildMode === 'city' ? 'on' : ''),
-      btn('aDev', `📜 発展(${v.devDeckCount})`, main && has(G.COST.dev) && v.devDeckCount > 0),
+      btn('aRoad', '🛤️ 街道<small class="cost">🌲🧱</small>', main && has(G.COST.road) && P.roadsLeft > 0, app.buildMode === 'road' ? 'on' : ''),
+      btn('aSet', '🏠 開拓地<small class="cost">🌲🧱🐑🌾</small>', main && has(G.COST.settlement) && P.settlementsLeft > 0, app.buildMode === 'settlement' ? 'on' : ''),
+      btn('aCity', '🏰 都市<small class="cost">🌾×2 ⛰️×3</small>', main && has(G.COST.city) && P.citiesLeft > 0, app.buildMode === 'city' ? 'on' : ''),
+      btn('aDev', `📜 発展(${v.devDeckCount})<small class="cost">🐑🌾⛰️</small>`, main && has(G.COST.dev) && v.devDeckCount > 0),
       btn('aTrade', '🤝 交易', main),
       btn('aEnd', '⏭️ ターン終了', main, main ? 'primary' : ''),
       ...(v.step === 'joinSetup' && myTurn ? [] : []),
@@ -590,7 +611,9 @@ function renderHUD() {
   on('aEnd', () => { app.buildMode = null; dispatch({ type: 'endTurn' }); });
   on('aNew', () => { store.del('hexisle-host'); store.del('hexisle-joined'); location.href = location.pathname; });
 
+  renderCostCard(P);
   renderTradeBanner();
+  renderOffer();
   updateTargets();
   autoModals();
 }
@@ -732,12 +755,12 @@ function renderTradeBanner() {
   const from = v.players[T.from];
   const desc = `<div><b>${esc(from.name)}</b> の提案：出す ${G.fmtRes(T.give)} ／ 欲しい ${G.fmtRes(T.get)}</div>`;
   const others = v.players.filter((p) => p.id !== T.from);
-  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false ? '❌' : '…'}`).join('　');
+  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false ? (T.auto?.[p.id] ? '❌<small>（資源不足）</small>' : '❌') : '…'}`).join('　');
   if (T.from === me) {
     // 提案者：承諾者と成立させる／取り下げ
     let localBtns = '';
     if (app.role === 'local') {
-      localBtns = others.map((p) => `<button data-la="${p.id}">${esc(p.name)}として承諾</button>`).join('');
+      localBtns = others.filter((p) => T.responses[p.id] === undefined).map((p) => `<button data-la="${p.id}">${esc(p.name)}として承諾</button>`).join('');
     }
     tb.innerHTML = `${desc}<div>${respText}</div><div class="row">${others.filter((p) => T.responses[p.id] === true).map((p) => `<button class="primary" data-w="${p.id}">${esc(p.name)} と成立</button>`).join('')}${localBtns}<button id="tCancel">取り下げ</button></div>`;
     tb.querySelectorAll('[data-w]').forEach((b) => (b.onclick = () => dispatch({ type: 'confirmTrade', with: +b.dataset.w })));
@@ -749,12 +772,48 @@ function renderTradeBanner() {
     const P = v.players[me];
     const can = P.res && G.hasRes(P.res, T.get);
     const answered = T.responses[me] !== undefined;
+    if (!answered && app.role !== 'local') return tb.classList.add('hidden'); // 中央の大きい表示で回答する
     tb.innerHTML = `${desc}<div>${respText}</div>${answered ? '' : `<div class="row"><button class="primary" id="tAcc" ${can ? '' : 'disabled'}>承諾</button><button id="tRej">拒否</button></div>`}`;
     if (!answered) {
       $('tAcc').onclick = () => dispatch({ type: 'respondTrade', accept: true });
       $('tRej').onclick = () => dispatch({ type: 'respondTrade', accept: false });
     }
   }
+}
+
+// 交渉を持ちかけられたとき：画面中央に大きく表示
+function renderOffer() {
+  const v = app.v, me = app.me, box = $('offer');
+  const T = v.trade;
+  const show = T && v.phase === 'play' && T.from !== me && T.responses[me] === undefined && app.role !== 'local';
+  if (!show) { box.classList.add('hidden'); app.offerShown = null; return; }
+  const P = v.players[me], from = v.players[T.from];
+  const can = P.res && G.hasRes(P.res, T.get);
+  const big = (r) => G.RES.filter((k) => r[k] > 0).map((k) => `<div class="oc"><div class="oi">${G.RES_ICON[k]}</div><div class="on">×${r[k]}</div><div class="ol">${G.RES_JP[k]}</div></div>`).join('');
+  box.innerHTML = `<div class="ocard" style="--pc:${from.color}">
+    <div class="ohead">🤝 <span class="dot" style="background:${from.color}"></span>${esc(from.name)} から交渉！</div>
+    <div class="orow"><div class="obox give"><div class="ot">あなたが渡す</div><div class="oset">${big(T.get)}</div></div>
+      <div class="oarrow">⇄</div>
+      <div class="obox get"><div class="ot">あなたがもらう</div><div class="oset">${big(T.give)}</div></div></div>
+    <div class="ohave">あなたの手札：${G.RES.map((k) => `${G.RES_ICON[k]}${P.res?.[k] ?? 0}`).join('　')}</div>
+    <div class="obtns"><button class="primary ok" id="oAcc" ${can ? '' : 'disabled'}>✅ 承諾する</button><button class="ng" id="oRej">❌ 断る</button></div>
+  </div>`;
+  box.classList.remove('hidden');
+  if (app.offerShown !== T.id) { app.offerShown = T.id; sfx('offer'); try { navigator.vibrate?.(150); } catch {} }
+  $('oAcc').onclick = () => dispatch({ type: 'respondTrade', accept: true });
+  $('oRej').onclick = () => dispatch({ type: 'respondTrade', accept: false });
+}
+
+// 建設コスト表（常時表示。いま建てられる物は✅）
+function renderCostCard(P) {
+  const ok = (c) => P.res && G.hasRes(P.res, c);
+  const row = (name, icons, c, pt = '') => `<div class="cc ${ok(c) ? 'ok' : ''}"><span class="mk">${ok(c) ? '✅' : '・'}</span><b>${name}</b><span class="ic">${icons}</span>${pt ? `<small>${pt}</small>` : ''}</div>`;
+  $('costCard').innerHTML = '<div class="cct">📋 建設コスト</div>'
+    + row('街道', '🌲🧱', G.COST.road)
+    + row('開拓地', '🌲🧱🐑🌾', G.COST.settlement, '1点')
+    + row('都市', '🌾🌾⛰️⛰️⛰️', G.COST.city, '2点')
+    + row('発展カード', '🐑🌾⛰️', G.COST.dev)
+    + '<div class="ccn">最長交易路(5本〜) +2点<br>最大騎士力(騎士3枚〜) +2点</div>';
 }
 
 // デバッグ用
