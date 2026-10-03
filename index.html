@@ -44,6 +44,7 @@
     <div class="menu-row"><input id="inviteUrl" readonly><button id="btnCopy">コピー</button></div>
     <ul id="seatList"></ul>
     <p id="lobbyMsg" class="msg">接続中…</p>
+    <p id="lobbyHint" class="sub"></p>
     <div class="menu-row"><button id="btnStart" class="primary hidden">ゲーム開始</button><button id="btnRetry" class="hidden">🔁 再接続</button><button id="btnLeave">戻る</button></div>
   </div>
 </section>
@@ -64,6 +65,8 @@
   </div>
   <button id="btnCost" class="mini">📋 建設コスト</button>
   <button id="btnSound" class="mini">🔊 音あり</button>
+  <button id="btnView" class="mini">🎥 視点リセット</button>
+  <button id="netBtn" class="mini net online" title="押すと再接続／最新に同期">🟢 接続中</button>
   <div id="costCard" class="hidden">
     <div><b>街道</b> 🌲🧱</div>
     <div><b>開拓地</b> 🌲🧱🐑🌾 <small>(1点)</small></div>
@@ -74,6 +77,8 @@
   </div>
 </section>
 
+<div id="turnFrame"></div>
+<div id="netBar" class="hidden"></div>
 <div id="flash"></div>
 <div id="bigNum"></div>
 <div id="banner"></div>
