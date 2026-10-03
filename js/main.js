@@ -1,13 +1,43 @@
 // =============================================================
 // アプリ本体：画面遷移・HUD・入力 → アクション送信
 // =============================================================
-import * as G from './game.js';
-import { BoardRenderer } from './render.js';
-import { Host, Client, randomCode } from './net.js';
-import { sfx, Sound } from './audio.js';
-import { RULE_SECTIONS } from './rules.js';
+import * as G from './game.js?v=20261003151941';
+import { BoardRenderer } from './render.js?v=20261003151941';
+import { Host, Client, randomCode } from './net.js?v=20261003151941';
+import { sfx, Sound } from './audio.js?v=20261003151941';
+import { RULE_SECTIONS } from './rules.js?v=20261003151941';
 
 const $ = (id) => document.getElementById(id);
+const BUILD = '20261003151941';
+
+// 予期しないエラーは画面に出す（黙って固まらないように）
+function showErr(msg) {
+  const e = $('errBar');
+  if (!e) return;
+  e.innerHTML = `⚠️ 表示エラーが起きました：${String(msg).replace(/[<>&]/g, '')}<br><button id="errReload">🔁 再読み込みして復帰（席はそのまま）</button>`;
+  e.classList.remove('hidden');
+  e.querySelector('#errReload').onclick = () => location.reload();
+}
+window.addEventListener('error', (ev) => showErr(ev.message));
+window.addEventListener('unhandledrejection', (ev) => showErr(ev.reason?.message || ev.reason));
+
+// 新しい版が公開されていないか確認（古いファイルが混ざると動かないため）
+async function checkVersion() {
+  if (BUILD.startsWith('__')) return; // 開発中
+  try {
+    const r = await fetch('version.json?' + Date.now(), { cache: 'no-store' });
+    const { v } = await r.json();
+    if (v === BUILD) return;
+    let tried = null; try { tried = sessionStorage.getItem('hexisle-reload'); } catch {}
+    if (!app?.v && tried !== v) { try { sessionStorage.setItem('hexisle-reload', v); } catch {} location.reload(); return; }
+    const e = $('errBar');
+    e.innerHTML = `🆕 新しい版が公開されています。<button id="errReload">🔁 再読み込み（席はそのまま戻ります）</button>${tried === v ? '<br>直らない場合は Ctrl+F5（スマホはタブを開き直す）' : ''}`;
+    e.classList.remove('hidden');
+    e.querySelector('#errReload').onclick = () => { try { sessionStorage.setItem('hexisle-reload', v); } catch {} location.reload(); };
+  } catch {}
+}
+setTimeout(checkVersion, 500);
+setInterval(checkVersion, 60000);
 const RES = G.RES;
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
@@ -125,6 +155,32 @@ $('netBtn').onclick = () => { if (app.role === 'client') { app.client?.reconnect
 $('btnView').onclick = () => renderer.resetView();
 $('btnRules').onclick = () => openRules();
 $('btnRulesMenu').onclick = () => openRules();
+
+// Windows（OS）の通知：自分の対応が必要になったとき、画面を見ていなくても知らせる
+const notifyOn = () => store.get('hexisle-notify') === true && 'Notification' in window && Notification.permission === 'granted';
+function notifyLabel() {
+  const b = $('btnNotify');
+  if (!('Notification' in window)) { b.textContent = '🔕 通知非対応'; b.disabled = true; return; }
+  b.textContent = notifyOn() ? '🔔 通知オン' : '🔕 通知オフ';
+  b.classList.toggle('on', notifyOn());
+}
+$('btnNotify').onclick = async () => {
+  if (!('Notification' in window)) return;
+  if (notifyOn()) { store.set('hexisle-notify', false); notifyLabel(); toast('通知をオフにしました'); return; }
+  let p = Notification.permission;
+  if (p === 'default') p = await Notification.requestPermission();
+  if (p !== 'granted') { toast('⚠️ ブラウザで通知がブロックされています（アドレスバー左の鍵マーク→通知を許可）'); notifyLabel(); return; }
+  store.set('hexisle-notify', true); notifyLabel();
+  new Notification('HEX ISLE', { body: '通知をオンにしました。自分の番や交渉が来たら知らせます', tag: 'hexisle-test' });
+};
+notifyLabel();
+function notify(body) {
+  if (!notifyOn() || document.hasFocus()) return; // 画面を見ているときは出さない
+  try {
+    const n = new Notification('HEX ISLE ～開拓の島～', { body, tag: 'hexisle-turn', renotify: true, requireInteraction: false });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch {}
+}
 
 // ルールブック（章ごとのタブ）
 function openRules(id = RULE_SECTIONS[0].id) {
@@ -365,9 +421,15 @@ function receive(v) {
   const wasMust = prev ? G.whoMustAct(prev).includes(app.me) && prev.phase !== 'ended' : false;
   document.body.classList.toggle('myturn', mustAct);
   document.body.style.setProperty('--me', v.players[app.me]?.color || '#ffd75a');
-  if (mustAct && !wasMust && app.role !== 'local') { try { navigator.vibrate?.([120, 80, 120]); } catch {} if (prev && v.step !== 'roll') sfx('myTurn'); }
+  if (mustAct && !wasMust && app.role !== 'local') {
+    try { navigator.vibrate?.([120, 80, 120]); } catch {}
+    if (prev && v.step !== 'roll') sfx('myTurn');
+    notify(v.step === 'discard' ? '7が出ました：手札を捨ててください' : v.step === 'steal' ? '奪う相手を選んでください' : v.step === 'robber' ? '盗賊を動かしてください' : 'あなたの番です');
+  }
+  const offerNow = v.trade && v.trade.from !== app.me && v.trade.responses[app.me] === undefined;
+  if (offerNow && app.lastNotifyTrade !== v.trade.id && app.role !== 'local') { app.lastNotifyTrade = v.trade.id; notify(`${v.players[v.trade.from].name} から交渉が来ました`); }
   titleBlink(mustAct && app.role !== 'local');
-  renderHUD();
+  try { renderHUD(); } catch (e) { console.error(e); showErr(e.message); }
 }
 
 let blinkT = null;
@@ -501,7 +563,7 @@ function statusText(v) {
   const who = '';
   if (v.phase === 'ended') return `🏆 ${v.players[v.winner].name} の勝利！`;
   if (v.phase === 'setup') {
-    const round = v.setup.idx < v.players.length ? '1巡目' : '2巡目（隣接資源をもらえる）';
+    const round = v.setup.idx < v.setup.order.length / 2 ? '1巡目' : '2巡目（隣接資源をもらえる）';
     return `初期配置 ${round} — ${v.setup.step === 'settlement' ? '開拓地を置く場所を選択' : '開拓地につながる街道を選択'}`;
   }
   if (v.step === 'discard') {

@@ -3,7 +3,7 @@
 // =============================================================
 import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
-import * as M from './models.js';
+import * as M from './models.js?v=20261003151941';
 
 const TOP = M.TILE_H;
 
