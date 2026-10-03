@@ -1,14 +1,14 @@
 // =============================================================
 // アプリ本体：画面遷移・HUD・入力 → アクション送信
 // =============================================================
-import * as G from './game.js?v=20261003152923';
-import { BoardRenderer } from './render.js?v=20261003152923';
-import { Host, Client, randomCode } from './net.js?v=20261003152923';
-import { sfx, Sound } from './audio.js?v=20261003152923';
-import { RULE_SECTIONS } from './rules.js?v=20261003152923';
+import * as G from './game.js?v=20261003154757';
+import { BoardRenderer } from './render.js?v=20261003154757';
+import { Host, Client, randomCode } from './net.js?v=20261003154757';
+import { sfx, Sound } from './audio.js?v=20261003154757';
+import { RULE_SECTIONS } from './rules.js?v=20261003154757';
 
 const $ = (id) => document.getElementById(id);
-const BUILD = '20261003152923';
+const BUILD = '20261003154757';
 
 // 予期しないエラーは画面に出す（黙って固まらないように）
 function showErr(msg) {
@@ -400,13 +400,36 @@ function enterGame() {
   closeModal();
 }
 
+// ダイスが転がっている間は結果（産出・ログ・手札・次の操作）を見せない
+const DICE_MS = 1050;
 function receive(v) {
+  if (app.hold) { app.pending = v; return; }
+  const rolled = app.v && app.boardKey && v.dice && (v.rollSeq || 0) !== app.lastRollSeq
+    && v.board.hexes.map((h) => h.terrain[0] + h.num).join('') === app.boardKey;
+  if (rolled) {
+    app.lastRollSeq = v.rollSeq;
+    renderer.rollDice(...v.dice);
+    sfx('diceShake');
+    app.hold = true; app.pending = v;
+    setTimeout(() => {
+      app.hold = false;
+      const p = app.pending; app.pending = null;
+      app.revealRoll = true;
+      applyState(p);
+    }, DICE_MS);
+    return;
+  }
+  applyState(v);
+}
+
+function applyState(v) {
   let prev = app.v;
   app.v = v;
   const key = v.board.hexes.map((h) => h.terrain[0] + h.num).join('');
   if (key !== app.boardKey) { app.boardKey = key; renderer.setBoard(v.board); app.lastRollSeq = v.rollSeq || 0; app.lastLogId = 0; $('log').innerHTML = ''; prev = null; }
   renderer.update(v);
-  if ((v.rollSeq || 0) !== app.lastRollSeq && v.dice) { app.lastRollSeq = v.rollSeq; renderer.rollDice(...v.dice); diceFx(v); }
+  if (app.revealRoll) { app.revealRoll = false; if (v.dice) diceFx(v); }
+  else if ((v.rollSeq || 0) !== app.lastRollSeq && v.dice) { app.lastRollSeq = v.rollSeq; renderer.rollDice(...v.dice); }
   if (prev && prev.board.robber !== v.board.robber) sfx('robber');
   if (prev) eventFx(prev, v);
   if (v._private && v.seq !== app.lastPrivSeq) { app.lastPrivSeq = v.seq; toast(v._private.t, true); }
@@ -456,7 +479,6 @@ function banner(text, color = '#d9822b', sub = '') {
 }
 
 function diceFx(v) {
-  sfx('diceShake');
   const sum = v.dice[0] + v.dice[1];
   setTimeout(() => {
     const n = $('bigNum');
@@ -473,7 +495,7 @@ function diceFx(v) {
       const hit = v.board.hexes.filter((h) => h.num === sum && h.id !== v.board.robber && h.vertices.some((x) => v.buildings[x])).length;
       if (hit) setTimeout(() => sfx('gain', hit + 1), 450);
     }
-  }, 600);
+  }, 0);
 }
 
 function eventFx(prev, v) {
@@ -817,7 +839,13 @@ function renderTradeBanner() {
   const from = v.players[T.from];
   const desc = `<div><b>${esc(from.name)}</b> の提案：出す ${G.fmtRes(T.give)} ／ 欲しい ${G.fmtRes(T.get)}</div>`;
   const others = v.players.filter((p) => p.id !== T.from);
-  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false ? '❌' : '…'}`).join('　');
+  // 自動の×は、人が考えて断ったように少し遅れて見せる（持っていないのがバレないように）
+  if (app.tradeSeen?.id !== T.id) {
+    app.tradeSeen = { id: T.id, t0: Date.now() };
+    Object.values(T.autoDelay || {}).forEach((ms) => setTimeout(() => app.v && renderTradeBanner(), ms + 50));
+  }
+  const hiddenAuto = (pid) => T.auto?.[pid] && pid !== me && Date.now() < app.tradeSeen.t0 + (T.autoDelay?.[pid] ?? 0);
+  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false && !hiddenAuto(p.id) ? '❌' : '…'}`).join('　');
   if (T.from === me) {
     // 提案者：承諾者と成立させる／取り下げ
     let localBtns = '';
@@ -848,11 +876,16 @@ function renderOffer() {
   const v = app.v, me = app.me, box = $('offer');
   const T = v.trade;
   const show = T && v.phase === 'play' && T.from !== me && T.responses[me] === undefined && app.role !== 'local';
-  if (!show) { box.classList.add('hidden'); app.offerShown = null; return; }
+  if (!show) { box.classList.add('hidden'); app.offerShown = null; app.offerSig = null; return; }
   const P = v.players[me], from = v.players[T.from];
   const can = P.res && G.hasRes(P.res, T.get);
+  // ほかの人が返事をしても作り直さない（同じ交渉・同じ手札なら何もしない）
+  const sig = T.id + '|' + JSON.stringify(P.res);
+  if (app.offerSig === sig && !box.classList.contains('hidden')) return;
+  const fresh = app.offerShown !== T.id;
+  app.offerSig = sig;
   const big = (r) => G.RES.filter((k) => r[k] > 0).map((k) => `<div class="oc"><div class="oi">${G.RES_ICON[k]}</div><div class="on">×${r[k]}</div><div class="ol">${G.RES_JP[k]}</div></div>`).join('');
-  box.innerHTML = `<div class="ocard" style="--pc:${from.color}">
+  box.innerHTML = `<div class="ocard ${fresh ? 'anim' : ''}" style="--pc:${from.color}">
     <div class="ohead">🤝 <span class="dot" style="background:${from.color}"></span>${esc(from.name)} から交渉！</div>
     <div class="orow"><div class="obox give"><div class="ot">あなたが渡す</div><div class="oset">${big(T.get)}</div></div>
       <div class="oarrow">⇄</div>

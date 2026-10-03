@@ -648,10 +648,13 @@ export function applyAction(s, a, rnd = Math.random) {
       need(total(a.give) > 0 && total(a.get) > 0, '出す資源と欲しい資源を選んでください');
       need(hasRes(P.res, a.give), '資源が足りません');
       need(!RES.some((r) => a.give[r] > 0 && a.get[r] > 0), '同じ資源を出して受け取ることはできません');
-      s.trade = { from: pid, give: { ...emptyRes(), ...a.give }, get: { ...emptyRes(), ...a.get }, responses: {}, auto: {}, id: (s.trade?.id || 0) + 1 };
+      s.trade = { from: pid, give: { ...emptyRes(), ...a.give }, get: { ...emptyRes(), ...a.get }, responses: {}, auto: {}, autoDelay: {}, id: (s.trade?.id || 0) + 1 };
       // 欲しい資源を持っていない人は最初から「×（資源不足）」にしておく
       s.players.forEach((o) => {
-        if (o.id !== pid && !hasRes(o.res, s.trade.get)) { s.trade.responses[o.id] = false; s.trade.auto[o.id] = true; }
+        if (o.id !== pid && !hasRes(o.res, s.trade.get)) {
+          s.trade.responses[o.id] = false; s.trade.auto[o.id] = true;
+          s.trade.autoDelay[o.id] = 3000 + Math.floor(rnd() * 7000); // 表示は3〜10秒後（人が断ったように見せる）
+        }
       });
       log(s, `🤝 ${P.name} が交渉を提案: 出す ${fmt(a.give)} ／ 欲しい ${fmt(a.get)}`);
       break;
