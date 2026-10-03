@@ -653,7 +653,7 @@ export function applyAction(s, a, rnd = Math.random) {
       s.players.forEach((o) => {
         if (o.id !== pid && !hasRes(o.res, s.trade.get)) {
           s.trade.responses[o.id] = false; s.trade.auto[o.id] = true;
-          s.trade.autoDelay[o.id] = 3000 + Math.floor(rnd() * 7000); // 表示は3〜10秒後（人が断ったように見せる）
+          s.trade.autoDelay[o.id] = 1500 + Math.floor(rnd() * 3500); // 表示は1.5〜5秒後のランダム（人が断ったように見せる）
         }
       });
       log(s, `🤝 ${P.name} が交渉を提案: 出す ${fmt(a.give)} ／ 欲しい ${fmt(a.get)}`);

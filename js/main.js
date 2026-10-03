@@ -1,14 +1,14 @@
 // =============================================================
 // アプリ本体：画面遷移・HUD・入力 → アクション送信
 // =============================================================
-import * as G from './game.js?v=20261003160627';
-import { BoardRenderer } from './render.js?v=20261003160627';
-import { Host, Client, randomCode } from './net.js?v=20261003160627';
-import { sfx, Sound } from './audio.js?v=20261003160627';
-import { RULE_SECTIONS } from './rules.js?v=20261003160627';
+import * as G from './game.js?v=20261003161405';
+import { BoardRenderer } from './render.js?v=20261003161405';
+import { Host, Client, randomCode } from './net.js?v=20261003161405';
+import { sfx, Sound } from './audio.js?v=20261003161405';
+import { RULE_SECTIONS } from './rules.js?v=20261003161405';
 
 const $ = (id) => document.getElementById(id);
-const BUILD = '20261003160627';
+const BUILD = '20261003161405';
 // 手番の強調色はプレイヤー色に関係なく統一（白など見えにくい色を避ける）
 const TURN_COLOR = '#ff9f1a';
 const TURN_TEXT = '#d35400';
