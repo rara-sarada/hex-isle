@@ -152,3 +152,42 @@ input, select { font: inherit; padding: 7px 10px; border-radius: 10px; border: 2
 .rc.bump { animation: bump .7s cubic-bezier(.2,1.8,.4,1) .9s both; }
 @keyframes bump { 0% { transform: translateY(0) scale(1); } 40% { transform: translateY(-16px) scale(1.15); box-shadow: 0 0 20px 4px #ffe27a; } 100% { transform: none; } }
 @media (max-width: 600px) { #bigNum { font-size: 96px; } #banner .bt { font-size: 22px; } #banner { padding: 8px 40px; } #btnSound { left: auto; right: 10px; top: 160px; bottom: auto; } }
+
+/* ---------- 手番の分かりやすさ ---------- */
+#turnFrame { position: fixed; inset: 0; pointer-events: none; z-index: 4; border: 0 solid var(--me, #ffd75a); transition: border-width .3s; }
+body.myturn #turnFrame { border-width: 7px; animation: frame 1.6s ease-in-out infinite; }
+@keyframes frame { 0%,100% { box-shadow: inset 0 0 30px 6px var(--me); opacity: 1; } 50% { box-shadow: inset 0 0 60px 16px var(--me); opacity: .75; } }
+#status { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 22px; border-radius: 18px; }
+#status .who { font-size: 20px; font-weight: 900; color: var(--pc); text-shadow: 0 1px 0 rgba(0,0,0,.35), 0 0 1px #000; display: flex; align-items: center; gap: 6px; }
+#status .who.wait { font-size: 16px; color: #4a3a2a; text-shadow: none; }
+#status .what { font-size: 13px; font-weight: normal; }
+#status.me { background: #fff3d0; border: 3px solid var(--me); box-shadow: 0 0 24px var(--me); animation: statusPop .5s cubic-bezier(.2,1.6,.4,1); }
+#status.me .who { font-size: 26px; }
+@keyframes statusPop { 0% { transform: translateX(-50%) scale(.7); } 100% { transform: translateX(-50%) scale(1); } }
+#status #skipBtn { margin-top: 4px; }
+.pl.cur { border-color: var(--pc); box-shadow: 0 0 14px var(--pc); transform: translateX(6px); transition: transform .2s; }
+.pl .arrow { color: var(--pc); font-size: 14px; animation: blink 1s steps(2) infinite; text-shadow: 0 0 1px #000; }
+@keyframes blink { 50% { opacity: .2; } }
+button.pulse { animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 2px 0 #a85e17, 0 0 0 0 rgba(255,180,60,.9); } 50% { box-shadow: 0 2px 0 #a85e17, 0 0 0 10px rgba(255,180,60,0); } }
+
+/* ---------- 接続状態 ---------- */
+#btnView { position: absolute; left: 228px; bottom: 10px; }
+#netBtn { position: absolute; left: 352px; bottom: 10px; }
+.net.connecting { background: #fff4c4; border-color: #c9a227; }
+.net.offline { background: #ffd9d4; border-color: #b03a2e; }
+#netBar { position: fixed; top: 0; left: 0; right: 0; z-index: 30; background: #b03a2e; color: #fff; text-align: center; padding: 8px; font-weight: bold; cursor: pointer; animation: blink 1.4s steps(2) infinite; }
+@media (max-width: 600px) {
+  #btnView { left: auto; right: 10px; top: 200px; bottom: auto; }
+  #netBtn { left: auto; right: 10px; top: 240px; bottom: auto; }
+  #status { bottom: auto; top: 110px; }
+  #status .who { font-size: 16px; } #status.me .who { font-size: 20px; }
+}
+/* 左下の小ボタンは縦に並べる（下部バーと重ならないように） */
+@media (min-width: 601px) {
+  #btnCost { left: 10px; bottom: 10px; }
+  #btnSound { left: 10px; bottom: 48px; }
+  #btnView { left: 10px; bottom: 86px; }
+  #netBtn { left: 10px; bottom: 124px; }
+  #costCard { left: 150px; bottom: 10px; }
+}
