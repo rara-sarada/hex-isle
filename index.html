@@ -31,6 +31,7 @@
       <select id="localCount"><option value="2">2人</option><option value="3" selected>3人</option><option value="4">4人</option></select>
       <button id="btnLocal">🎮 1台で遊ぶ（交代制）</button>
     </div>
+ <div class="menu-row"><button id="btnRulesMenu">📖 ルールブックを読む</button></div>
     <div id="resumeBox" class="menu-row hidden"><button id="btnResume">↩️ 前回の部屋を再開（ホスト）</button></div>
     <p id="menuMsg" class="msg"></p>
   </div>
@@ -59,22 +60,16 @@
   </div>
   <div id="tradeBanner" class="hidden"></div>
   <div id="bottom">
-    <div id="hand"></div>
     <div id="devs"></div>
     <div id="actions"></div>
+    <div id="handRow"><div id="handInfo"></div><div id="hand"></div></div>
   </div>
-  <button id="btnCost" class="mini">📋 建設コスト</button>
+  <div id="offer" class="hidden"></div>
+  <button id="btnRules" class="mini">📖 ルール</button>
   <button id="btnSound" class="mini">🔊 音あり</button>
   <button id="btnView" class="mini">🎥 視点リセット</button>
   <button id="netBtn" class="mini net online" title="押すと再接続／最新に同期">🟢 接続中</button>
-  <div id="costCard" class="hidden">
-    <div><b>街道</b> 🌲🧱</div>
-    <div><b>開拓地</b> 🌲🧱🐑🌾 <small>(1点)</small></div>
-    <div><b>都市</b> 🌾🌾⛰️⛰️⛰️ <small>(2点)</small></div>
-    <div><b>発展カード</b> 🐑🌾⛰️</div>
-    <hr>
-    <small>最長交易路(5本以上) +2点 ／ 最大騎士力(騎士3枚以上) +2点</small>
-  </div>
+  <div id="costCard"></div>
 </section>
 
 <div id="turnFrame"></div>
