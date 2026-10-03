@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>HEX ISLE ～開拓の島～</title>
 <meta name="description" content="ブラウザで遊べる3D島開拓ボードゲーム（オンライン対戦対応）">
-<link rel="stylesheet" href="css/style.css">
+<meta name="color-scheme" content="only light">
+<link rel="stylesheet" href="css/style.css?v=20261003151941">
 <script src="js/vendor/peerjs.min.js"></script>
 <script type="importmap">
 { "imports": { "three": "./js/vendor/three.module.js" } }
@@ -60,12 +61,13 @@
   </div>
   <div id="tradeBanner" class="hidden"></div>
   <div id="bottom">
+    <div id="handRow"><div id="handInfo"></div><div id="hand"></div></div>
     <div id="devs"></div>
     <div id="actions"></div>
-    <div id="handRow"><div id="handInfo"></div><div id="hand"></div></div>
   </div>
   <div id="offer" class="hidden"></div>
   <button id="btnRules" class="mini">📖 ルール</button>
+  <button id="btnNotify" class="mini">🔕 通知オフ</button>
   <button id="btnSound" class="mini">🔊 音あり</button>
   <button id="btnView" class="mini">🎥 視点リセット</button>
   <button id="netBtn" class="mini net online" title="押すと再接続／最新に同期">🟢 接続中</button>
@@ -79,7 +81,8 @@
 <div id="banner"></div>
 <div id="modal" class="hidden"><div class="card" id="modalBody"></div></div>
 <div id="toasts"></div>
+<div id="errBar" class="hidden"></div>
 
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/main.js?v=20261003151941"></script>
 </body>
 </html>
