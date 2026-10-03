@@ -1,14 +1,14 @@
 // =============================================================
 // アプリ本体：画面遷移・HUD・入力 → アクション送信
 // =============================================================
-import * as G from './game.js?v=20261003151941';
-import { BoardRenderer } from './render.js?v=20261003151941';
-import { Host, Client, randomCode } from './net.js?v=20261003151941';
-import { sfx, Sound } from './audio.js?v=20261003151941';
-import { RULE_SECTIONS } from './rules.js?v=20261003151941';
+import * as G from './game.js?v=20261003152923';
+import { BoardRenderer } from './render.js?v=20261003152923';
+import { Host, Client, randomCode } from './net.js?v=20261003152923';
+import { sfx, Sound } from './audio.js?v=20261003152923';
+import { RULE_SECTIONS } from './rules.js?v=20261003152923';
 
 const $ = (id) => document.getElementById(id);
-const BUILD = '20261003151941';
+const BUILD = '20261003152923';
 
 // 予期しないエラーは画面に出す（黙って固まらないように）
 function showErr(msg) {
@@ -817,7 +817,7 @@ function renderTradeBanner() {
   const from = v.players[T.from];
   const desc = `<div><b>${esc(from.name)}</b> の提案：出す ${G.fmtRes(T.give)} ／ 欲しい ${G.fmtRes(T.get)}</div>`;
   const others = v.players.filter((p) => p.id !== T.from);
-  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false ? (T.auto?.[p.id] ? '❌<small>（資源不足）</small>' : '❌') : '…'}`).join('　');
+  const respText = others.map((p) => `${esc(p.name)}: ${T.responses[p.id] === true ? '✅' : T.responses[p.id] === false ? '❌' : '…'}`).join('　');
   if (T.from === me) {
     // 提案者：承諾者と成立させる／取り下げ
     let localBtns = '';
