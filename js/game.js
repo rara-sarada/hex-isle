@@ -194,11 +194,12 @@ export function canPlaceRoadAt(s, e, pid, fromVertex = null) {
 export function legalTargets(s, pid, kind) {
   const B = s.board;
   if (kind === 'settlement') {
-    const setup = s.phase === 'setup';
-    return B.vertices.map((v) => v.id).filter((v) => canPlaceSettlementAt(s, v, pid, !setup));
+    const setup = s.phase === 'setup' || s.step === 'joinSetup';
+    // 初期配置では、隣に空いている辺（街道を置ける場所）がある頂点だけ
+    return B.vertices.map((v) => v.id).filter((v) => canPlaceSettlementAt(s, v, pid, !setup) && (!setup || B.vertices[v].edges.some((e) => s.roads[e] === undefined)));
   }
   if (kind === 'road') {
-    const from = s.phase === 'setup' ? s.setup.lastVertex : null;
+    const from = s.phase === 'setup' ? s.setup.lastVertex : s.step === 'joinSetup' ? s.joinSetup.lastVertex : null;
     return B.edges.map((e) => e.id).filter((e) => canPlaceRoadAt(s, e, pid, from));
   }
   if (kind === 'city') {
@@ -344,6 +345,81 @@ function afterRobberMoved(s, rnd) {
   s.stealCands = cands;
 }
 
+// 手番を次の人へ
+function passTurn(s) {
+  const P = s.players[s.current];
+  P.dev.push(...P.newDev); P.newDev = [];
+  s.freeRoads = 0; s.devPlayed = false; s.trade = null; s.dice = null;
+  delete s.stealCands;
+  s.current = (s.current + 1) % s.players.length;
+  log(s, `— ${pname(s, s.current)} の手番 —`);
+  beginTurn(s);
+}
+function beginTurn(s) {
+  const P = s.players[s.current];
+  if (P.pendingSetup > 0 && legalTargets(s, P.id, 'settlement').length === 0) {
+    P.pendingSetup = 0;
+    log(s, `${P.name} の初期配置：置ける場所がないため省略`);
+  }
+  if (P.pendingSetup > 0) {
+    s.step = 'joinSetup';
+    s.joinSetup = { step: 'settlement', lastVertex: null };
+    if (P.pendingSetup === 2) log(s, `${P.name} は途中参加：開拓地と街道を2回置いてください`);
+  } else s.step = 'roll';
+}
+
+// 途中参加（最大4人）
+export function addPlayer(s, name) {
+  if (s.players.length >= 4) throw new Error('満員です（最大4人）');
+  const id = s.players.length;
+  s.players.push({
+    id, name, color: PLAYER_COLORS[id],
+    res: emptyRes(), dev: [], newDev: [], knights: 0,
+    roadsLeft: 15, settlementsLeft: 5, citiesLeft: 4, pendingSetup: 2,
+  });
+  log(s, `🙋 ${name} が途中参加しました（自分の番で初期配置）`);
+  s.seq++;
+  return id;
+}
+
+// ホストによる強制スキップ
+function forceSkip(s, rnd) {
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const act = (a) => applyAction(s, a, rnd);
+  if (s.step === 'discard') {
+    for (const pid of Object.keys(s.pendingDiscard).map(Number)) {
+      if (pid === 0) continue;
+      const P = s.players[pid], need = s.pendingDiscard[pid];
+      const pool = RES.flatMap((r) => Array(P.res[r]).fill(r));
+      const res = emptyRes();
+      for (let i = 0; i < need; i++) res[pool.splice(Math.floor(rnd() * pool.length), 1)[0]]++;
+      act({ type: 'discard', pid, res });
+    }
+    log(s, '⏭️ ホストが捨て札を自動処理しました');
+    return;
+  }
+  const pid = s.current;
+  log(s, `⏭️ ホストが ${pname(s, pid)} の番を自動で進めました`);
+  let guard = 0;
+  while (guard++ < 20) {
+    if (s.phase === 'ended' || s.current !== pid) return;
+    const setupNow = s.phase === 'setup' || s.step === 'joinSetup';
+    if (setupNow) {
+      const st = s.phase === 'setup' ? s.setup.step : s.joinSetup.step;
+      if (st === 'settlement') act({ type: 'setupSettlement', pid, v: pick(legalTargets(s, pid, 'settlement')) });
+      else act({ type: 'setupRoad', pid, e: pick(legalTargets(s, pid, 'road')) });
+      if (s.phase === 'setup' && s.current !== pid) return; // 初期配置は1手番ずつ
+      continue;
+    }
+    if (s.step === 'robber') { act({ type: 'moveRobber', pid, hex: pick(legalTargets(s, pid, 'robber')) }); continue; }
+    if (s.step === 'steal') { act({ type: 'steal', pid, victim: pick(s.stealCands) }); continue; }
+    if (s.step === 'discard') return;
+    // roll / main：ダイスを振らずに手番を渡す
+    passTurn(s);
+    return;
+  }
+}
+
 // -------------------------------------------------------------
 // アクション適用（違反時は Error を投げる）
 // action = { type, pid, ... }
@@ -360,14 +436,31 @@ export function applyAction(s, a, rnd = Math.random) {
   switch (a.type) {
     // ---------- 初期配置 ----------
     case 'setupSettlement': {
+      if (s.step === 'joinSetup') {
+        // 途中参加プレイヤーの初期配置
+        need(isCur && s.joinSetup.step === 'settlement', 'いまは置けません');
+        need(legalTargets(s, pid, 'settlement').includes(a.v), 'そこには置けません');
+        s.buildings[a.v] = { owner: pid, type: 'settlement' };
+        P.settlementsLeft--;
+        s.joinSetup.lastVertex = a.v;
+        s.joinSetup.step = 'road';
+        if (P.pendingSetup === 1) {
+          for (const h of s.board.vertices[a.v].hexes) {
+            const r = TERRAIN_RES[s.board.hexes[h].terrain];
+            if (r && s.bank[r] > 0) { P.res[r]++; s.bank[r]--; }
+          }
+        }
+        log(s, `${P.name} が開拓地を配置`);
+        break;
+      }
       need(s.phase === 'setup' && isCur && s.setup.step === 'settlement', 'いまは置けません');
-      need(canPlaceSettlementAt(s, a.v, pid, false), 'そこには置けません');
+      need(legalTargets(s, pid, 'settlement').includes(a.v), 'そこには置けません');
       s.buildings[a.v] = { owner: pid, type: 'settlement' };
       P.settlementsLeft--;
       s.setup.lastVertex = a.v;
       s.setup.step = 'road';
       // 2巡目は隣接タイルの資源を受け取る
-      if (s.setup.idx >= s.players.length) {
+      if (s.setup.idx >= s.setup.order.length / 2) {
         for (const h of s.board.vertices[a.v].hexes) {
           const r = TERRAIN_RES[s.board.hexes[h].terrain];
           if (r && s.bank[r] > 0) { P.res[r]++; s.bank[r]--; }
@@ -377,6 +470,16 @@ export function applyAction(s, a, rnd = Math.random) {
       break;
     }
     case 'setupRoad': {
+      if (s.step === 'joinSetup') {
+        need(isCur && s.joinSetup.step === 'road', 'いまは置けません');
+        need(canPlaceRoadAt(s, a.e, pid, s.joinSetup.lastVertex), 'そこには置けません');
+        s.roads[a.e] = pid; P.roadsLeft--;
+        P.pendingSetup--;
+        if (P.pendingSetup > 0) { delete s.joinSetup; beginTurn(s); }
+        else { delete s.joinSetup; s.step = 'roll'; log(s, `${P.name} の初期配置完了。ダイスを振ってください`); }
+        updateLongestRoad(s);
+        break;
+      }
       need(s.phase === 'setup' && isCur && s.setup.step === 'road', 'いまは置けません');
       need(canPlaceRoadAt(s, a.e, pid, s.setup.lastVertex), 'そこには置けません');
       s.roads[a.e] = pid; P.roadsLeft--;
@@ -384,8 +487,9 @@ export function applyAction(s, a, rnd = Math.random) {
       s.setup.step = 'settlement';
       s.setup.lastVertex = null;
       if (s.setup.idx >= s.setup.order.length) {
-        s.phase = 'play'; s.current = 0; s.step = 'roll';
+        s.phase = 'play'; s.current = 0;
         log(s, `初期配置完了！ ${pname(s, 0)} の手番です`);
+        beginTurn(s);
       } else {
         s.current = s.setup.order[s.setup.idx];
       }
@@ -575,11 +679,13 @@ export function applyAction(s, a, rnd = Math.random) {
 
     case 'endTurn': {
       need(s.phase === 'play' && isCur && s.step === 'main', 'いまはターンを終了できません');
-      P.dev.push(...P.newDev); P.newDev = [];
-      s.freeRoads = 0; s.devPlayed = false; s.trade = null; s.dice = null;
-      s.current = (s.current + 1) % s.players.length;
-      s.step = 'roll';
-      log(s, `— ${pname(s, s.current)} の手番 —`);
+      passTurn(s);
+      break;
+    }
+    case 'forceSkip': {
+      // ホスト専用：止まっている人（切断・放置）の処理を自動で進める
+      need(pid === 0, 'ホストだけが使えます');
+      forceSkip(s, rnd);
       break;
     }
     default: throw new Error('不明なアクション: ' + a.type);

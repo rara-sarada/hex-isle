@@ -191,7 +191,11 @@ export function createNumberToken(num) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   const geo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 40);
-  const m = mesh(geo, [mat('#d8c7a0'), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 }), mat('#d8c7a0')]);
+  // 数字面は照明・影・トーンマップの影響を受けない（暗くなって読めなくなるのを防ぐ）
+  const face = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false });
+  const m = mesh(geo, [mat('#d8c7a0'), face, mat('#d8c7a0')]);
+  m.receiveShadow = false;
+  m.castShadow = false;
   m.rotation.y = Math.PI / 2; // テクスチャの向き補正（画面上方向＝-Z に数字の上が来る）
   return m;
 }

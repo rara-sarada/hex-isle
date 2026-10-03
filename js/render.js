@@ -11,7 +11,7 @@ export class BoardRenderer {
   constructor(container) {
     this.container = container;
     const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true }));
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
     r.toneMapping = THREE.ACESFilmicToneMapping;
@@ -36,7 +36,8 @@ export class BoardRenderer {
     const sun = new THREE.DirectionalLight('#fff4dd', 2.2);
     sun.position.set(6, 12, 5);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    const lowEnd = window.innerWidth < 900 || /Android|iPhone|iPad/i.test(navigator.userAgent);
+    sun.shadow.mapSize.set(lowEnd ? 1024 : 2048, lowEnd ? 1024 : 2048);
     Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 40 });
     sun.shadow.bias = -0.0008;
     sun.shadow.radius = 3;
@@ -81,6 +82,9 @@ export class BoardRenderer {
     this.dice.forEach((d, i) => { d.position.set(5.2 + i * 0.5, 0.06, 3.6); scene.add(d); });
 
     this._bindEvents();
+    // GPUの描画コンテキストが失われたら（盤面が真っ黒になる原因）作り直す
+    r.domElement.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this._lost = true; });
+    r.domElement.addEventListener('webglcontextrestored', () => { this._lost = false; this.rebuild(); });
     this._resize();
     window.addEventListener('resize', () => this._resize());
     r.setAnimationLoop(() => this._tick());
@@ -178,7 +182,23 @@ export class BoardRenderer {
   // ---------------------------------------------------------
   // 状態反映（建物・道・盗賊）
   // ---------------------------------------------------------
+  // 盤面・駒を作り直す（コンテキスト復帰時など）
+  rebuild() {
+    if (!this.board) return;
+    this.fx.forEach((f) => this.fxGroup.remove(f.mesh)); this.fx = [];
+    this.setBoard(this.board);
+    this._initialized = false;
+    if (this.lastState) this.update(this.lastState);
+  }
+
+  resetView() {
+    this.camera.position.set(0, 10.5, 9.5);
+    this.controls.target.set(0, 0, 0.4);
+    this.controls.update();
+  }
+
   update(state) {
+    this.lastState = state;
     const B = this.board;
     if (!B) return;
     // 盗賊
@@ -322,7 +342,7 @@ export class BoardRenderer {
 
   smoke(pos) {
     for (let i = 0; i < 14; i++) {
-      const m = new THREE.Mesh(FXG.sphere, new THREE.MeshStandardMaterial({ color: '#2b2b33', transparent: true, opacity: 0.7, roughness: 1, depthWrite: false }));
+      const m = new THREE.Mesh(FXG.sphere, new THREE.MeshStandardMaterial({ color: '#6a6a74', transparent: true, opacity: 0.5, roughness: 1, depthWrite: false }));
       m.position.copy(pos).add(new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.1 + Math.random() * 0.2, (Math.random() - 0.5) * 0.3));
       m.scale.setScalar(0.06 + Math.random() * 0.05);
       this._spawn(m, 900 + Math.random() * 500, new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.5 + Math.random() * 0.4, (Math.random() - 0.5) * 0.3), { grow: 1.6 });
@@ -431,6 +451,7 @@ export class BoardRenderer {
   }
 
   _tick() {
+    if (this._lost) return;
     const now = performance.now();
     const t = now / 1000;
     // 波

@@ -40,12 +40,33 @@ const tabStore = {
   get(k) { try { return JSON.parse(sessionStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-let token = tabStore.get('hexisle-token');
-if (!token) { token = Math.random().toString(36).slice(2) + Date.now().toString(36); tabStore.set('hexisle-token', token); }
+const newTok = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+let token = tabStore.get('hexisle-token') || newTok();
+tabStore.set('hexisle-token', token);
+// 部屋ごとの席トークン：タブ（sessionStorage）とブラウザ（localStorage）の両方に保存。
+// タブを閉じても・ブラウザを再起動しても同じ席に戻れる
+const seatKey = (code) => 'hexisle-seat-' + code;
+const loadSeatToken = (code) => tabStore.get(seatKey(code)) || store.get(seatKey(code)) || newTok();
+const saveSeatToken = (code, t) => { tabStore.set(seatKey(code), t); store.set(seatKey(code), t); };
 $('nameInput').value = store.get('hexisle-name') || '';
-const urlRoom = new URLSearchParams(location.search).get('room');
+const urlQ = new URLSearchParams(location.search);
+const urlRoom = urlQ.get('room');
 if (urlRoom) $('codeInput').value = urlRoom.toUpperCase();
 if (store.get('hexisle-host')) $('resumeBox').classList.remove('hidden');
+// URLを部屋に合わせて書き換える（再読み込みで自動復帰できるように）
+function setUrl(code, isHost) {
+  const q = new URLSearchParams(location.search);
+  q.set('room', code);
+  if (isHost) q.set('host', '1'); else q.delete('host');
+  history.replaceState(null, '', `${location.pathname}?${q}`);
+}
+// 自動復帰：ホストは保存済みの部屋を、参加者は前回入った部屋へ
+setTimeout(() => {
+  const saved = store.get('hexisle-host');
+  const room = urlRoom?.toUpperCase();
+  if (urlQ.get('host') === '1' && saved && saved.code === room) return startHost(saved.code, saved);
+  if (room && !urlQ.get('host') && (tabStore.get(seatKey(room)) || store.get('hexisle-joined') === room)) startClient(room);
+}, 0);
 
 // -------------------------------------------------------------
 // 共通UI
@@ -96,8 +117,10 @@ $('btnResume').onclick = () => {
   if (!saved) return;
   startHost(saved.code, saved);
 };
-$('btnLeave').onclick = () => (location.href = location.pathname + location.search.replace(/[?&]room=[^&]*/, ''));
-$('btnRetry').onclick = () => { try { app.client?.peer.destroy(); } catch {} $('btnRetry').classList.add('hidden'); $('lobbyMsg').textContent = '部屋に接続中…'; connectClient(); };
+$('btnLeave').onclick = () => { store.del('hexisle-joined'); location.href = location.pathname + location.search.replace(/[?&](room|host)=[^&]*/g, ''); };
+$('btnRetry').onclick = () => { $('btnRetry').classList.add('hidden'); $('lobbyMsg').textContent = '部屋に接続中…'; app.client?.reconnect(); };
+$('netBtn').onclick = () => { if (app.role === 'client') { app.client?.reconnect(); toast('再接続しています…', true); } else if (app.role === 'host') { publish(); toast('全員に最新の盤面を送りました', true); } };
+$('btnView').onclick = () => renderer.resetView();
 $('btnCopy').onclick = () => { $('inviteUrl').select(); navigator.clipboard?.writeText($('inviteUrl').value); toast('招待リンクをコピーしました', true); };
 $('btnCost').onclick = () => $('costCard').classList.toggle('hidden');
 document.addEventListener('click', (e) => { if (e.target.closest('button:not(:disabled)')) sfx('click'); }, true);
@@ -130,12 +153,22 @@ function startHost(code, saved = null) {
   $('roomCode').textContent = code;
   $('inviteUrl').value = inviteUrl(code);
   $('lobbyMsg').textContent = '接続サーバーに登録中…';
+  setUrl(code, true);
   const host = (app.host = new Host(code, {
-    onOpen: () => { $('lobbyMsg').textContent = saved ? '部屋を再開しました。参加者の再接続を待っています' : '友だちに部屋コードか招待リンクを送ってください'; renderLobby(); },
-    onError: (e) => { $('lobbyMsg').textContent = peerErrorText(e); toast(peerErrorText(e)); },
+    onOpen: () => {
+      $('lobbyMsg').textContent = saved ? '部屋を再開しました。参加者の再接続を待っています' : '友だちに部屋コードか招待リンクを送ってください';
+      setNet('online');
+      if (app.game) { publish(); toast('部屋をオンラインに戻しました。参加者は自動で戻ってきます', true); } else renderLobby();
+    },
+    onError: (e) => {
+      if (e?.type === 'id-wait') { setNet('connecting', e.retry); $('lobbyMsg').textContent = `前回の接続の解放を待っています…（${e.retry}）`; return; }
+      $('lobbyMsg').textContent = peerErrorText(e); toast(peerErrorText(e)); setNet('offline');
+    },
     onJoin: (i) => { if (app.game) { publish(); toast(`${host.seats[i].name} が接続しました`, true); } else renderLobby(); },
-    onLeave: (i) => { if (app.game) { publish(); toast(`${host.seats[i].name} が切断しました`); } else { host.seats.splice(i, 1); host.seats.forEach((s, j) => s.conn && (s.conn._seat = j)); renderLobby(); } },
+    onLeave: (i) => { if (app.game) { publish(); toast(`${host.seats[i].name} が切断しました（自動で戻れます）`); } else { host.seats.splice(i, 1); host.seats.forEach((s, j) => s.conn && (s.conn._seat = j)); renderLobby(); } },
+    onNewcomer: (i, name) => { G.addPlayer(app.game, name); toast(`${name} が途中参加しました`, true); },
     onMessage: (i, m) => hostHandle(i, m),
+    getSeq: () => app.game?.seq ?? 0,
   }));
   if (saved) {
     host.seats = saved.seats.map((s, i) => ({ ...s, conn: null, connected: i === 0, local: i === 0 }));
@@ -157,8 +190,9 @@ function renderLobby() {
   $('seatList').querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => { app.host.kick(+b.dataset.kick); renderLobby(); }));
   const isHost = app.role === 'host';
   $('btnStart').classList.toggle('hidden', !isHost);
-  $('btnStart').disabled = seats.length < 2;
-  $('btnStart').textContent = seats.length < 2 ? 'ゲーム開始（2人以上）' : `ゲーム開始（${seats.length}人）`;
+  $('btnStart').disabled = seats.length < 1;
+  $('btnStart').textContent = `いまの${seats.length}人でゲーム開始`;
+  if (isHost) $('lobbyHint').textContent = '人数は決めなくてOK。集まった人で開始でき、開始後も4人まで途中参加できます';
   if (isHost) app.host.broadcast((i) => ({ t: 'lobby', seats: seats.map((s) => ({ name: s.name })), you: i }));
 }
 $('btnStart').onclick = () => {
@@ -170,12 +204,14 @@ $('btnStart').onclick = () => {
   publish();
 };
 
+const stateMsg = (i) => ({ t: 'state', s: G.view(app.game, i), you: i, online: app.host.seats.map((s) => !!s.connected) });
 function hostHandle(i, m) {
+  if (m.t === 'sync' && app.game) return app.host.send(i, stateMsg(i)); // 同期ズレの修復要求
   if (m.t === 'act' && app.game) {
     try {
       G.applyAction(app.game, { ...m.a, pid: i });
       publish();
-    } catch (e) { app.host.send(i, { t: 'err', msg: e.message }); }
+    } catch (e) { app.host.send(i, { t: 'err', msg: e.message }); app.host.send(i, stateMsg(i)); }
   } else if (m.t === 'chat') {
     const c = { from: app.host.seats[i]?.name || '?', text: String(m.text).slice(0, 80) };
     app.host.broadcast(() => ({ t: 'chat', ...c }));
@@ -197,35 +233,62 @@ function startClient(code) {
 }
 function connectClient() {
   app.joined = false;
+  token = loadSeatToken(app.code);
+  saveSeatToken(app.code, token);
+  store.set('hexisle-joined', app.code);
+  setUrl(app.code, false);
   clearTimeout(app.joinTimer);
   app.joinTimer = setTimeout(() => {
     if (app.joined) return;
-    $('lobbyMsg').innerHTML = 'ホストに接続できません。<br>・部屋コードが正しいか／ホストがロビー画面を開いたままか確認<br>・会社/学校/一部モバイル回線ではP2P通信が遮断されることがあります（Wi-Fiを切り替えて再試行）';
+    $('lobbyMsg').innerHTML = 'ホストに接続できません（自動で再試行中）。<br>・部屋コードが正しいか／ホストが画面を開いたままか確認<br>・会社/学校/一部モバイル回線ではP2P通信が遮断されることがあります（Wi-Fiを切り替えて再試行）';
     $('btnRetry')?.classList.remove('hidden');
   }, 15000);
+  try { app.client?.peer?.destroy(); } catch {}
   app.client = new Client(app.code, myName(), token, {
-    onOpen: () => { $('lobbyMsg').textContent = 'ホストの開始を待っています'; },
-    onError: (e) => { const t = peerErrorText(e); $('lobbyMsg').textContent = t; toast(t); },
-    onClose: () => {
-      toast('ホストとの接続が切れました');
-      if (app.v) modal(`<h3>接続が切れました</h3><p>ホストがページを閉じたか、通信が途切れました。</p><div class="row-end"><button class="primary" id="re">再接続</button></div>`,
-        (b) => (b.querySelector('#re').onclick = () => { closeModal(); connectClient(); }));
-    },
+    onStatus: (st, n) => setNet(st, n),
+    onError: (e, n) => { if (!app.joined && n <= 1) $('lobbyMsg').textContent = peerErrorText(e) + '（自動で再試行します）'; },
     onMessage: (m) => {
-      if (m.t === 'token') { token = m.token; tabStore.set('hexisle-token', token); }
-      else if (m.t === 'lobby') { app.joined = true; app.lobbySeats = m.seats; app.me = m.you; renderLobby(); }
+      if (m.t === 'token') { token = m.token; saveSeatToken(app.code, token); }
+      else if (m.t === 'ping') { if (app.v && m.seq !== app.v.seq) app.client.send({ t: 'sync' }); } // 番号がずれていたら最新を要求
+      else if (m.t === 'lobby') { app.joined = true; app.lobbySeats = m.seats; app.me = m.you; $('lobbyMsg').textContent = 'ホストの開始を待っています'; renderLobby(); }
       else if (m.t === 'reject') { $('lobbyMsg').textContent = m.msg; toast(m.msg); }
+      else if (m.t === 'choose') chooseSeat(m);
       else if (m.t === 'state') {
         app.joined = true;
+        // 古い状態が後から届いても無視（順序の入れ替わり対策）
+        if (app.v && m.s.seq < app.v.seq && m.you === app.me) return;
         app.me = m.you;
         app.seatsOnline = m.online;
         if (!app.v) enterGame();
+        if (app.modalKind === 'choose') closeModal();
         receive(m.s);
       } else if (m.t === 'err') toast('⚠️ ' + m.msg);
       else if (m.t === 'chat') addChat(m);
     },
   });
 }
+
+// ゲーム中に席トークンが分からない場合：どの席に戻るか選ぶ
+function chooseSeat(m) {
+  app.joined = true;
+  app.modalKind = 'choose';
+  const btns = m.offline.map((s) => `<button class="primary" data-seat="${s.i}">「${esc(s.name)}」として戻る</button>`).join('');
+  modal(`<h3>ゲームは進行中です</h3><p>${m.offline.length ? '切断中の席に戻れます。自分の席を選んでください。' : ''}${m.canJoin ? '新しいプレイヤーとして途中参加もできます（自分の番で初期配置）。' : ''}</p>
+    <div class="row-end" style="flex-direction:column;align-items:stretch">${btns}${m.canJoin ? '<button data-seat="new">🙋 新しく途中参加する</button>' : ''}${!btns && !m.canJoin ? '<p>空いている席がありません（満員）。</p>' : ''}</div>`,
+  (b) => b.querySelectorAll('[data-seat]').forEach((x) => (x.onclick = () => { app.client.send({ t: 'claim', seat: x.dataset.seat }); $('modalBody').innerHTML = '<p>接続中…</p>'; })));
+}
+
+// 接続状態の表示
+function setNet(st, n) {
+  app.net = st;
+  const el = $('netBtn');
+  if (!el) return;
+  el.className = 'mini net ' + st;
+  el.textContent = st === 'online' ? '🟢 接続中' : st === 'connecting' ? `🟡 再接続中…${n > 1 ? `（${n}回目）` : ''}` : '🔴 切断（自動で再接続します）';
+  $('netBar').classList.toggle('hidden', st === 'online' || !app.v);
+  $('netBar').textContent = st === 'online' ? '' : '📡 接続が切れました。自動で戻ります…（押すとすぐ再接続）';
+}
+$('netBar').onclick = () => app.client?.reconnect();
 
 // -------------------------------------------------------------
 // 状態の配信と受信
@@ -239,9 +302,8 @@ function actor() {
 
 function publish() {
   if (app.role === 'host') {
-    const online = app.host.seats.map((s) => !!s.connected);
-    app.host.broadcast((i) => ({ t: 'state', s: G.view(app.game, i), you: i, online }));
-    app.seatsOnline = online;
+    app.host.broadcast((i) => stateMsg(i));
+    app.seatsOnline = app.host.seats.map((s) => !!s.connected);
     store.set('hexisle-host', app.game.phase === 'ended' ? null : { code: app.code, game: app.game, seats: app.host.seats.map((s) => ({ name: s.name, token: s.token })) });
     receive(G.view(app.game, 0));
   } else if (app.role === 'local') {
@@ -251,7 +313,10 @@ function publish() {
 }
 
 function dispatch(a) {
-  if (app.role === 'client') return app.client.send({ t: 'act', a });
+  if (app.role === 'client') {
+    if (!app.client.online) { toast('⚠️ 接続が切れています。再接続を待ってください'); app.client.reconnect(); return; }
+    return app.client.send({ t: 'act', a, base: app.v?.seq });
+  }
   try {
     G.applyAction(app.game, { pid: app.me, ...a });
     publish();
@@ -279,8 +344,25 @@ function receive(v) {
     else if (v.current === app.me) { banner('あなたの番！', v.players[app.me].color); sfx('myTurn'); }
   }
   if (app.buildMode && !(v.current === app.me && v.step === 'main')) app.buildMode = null;
+  // 自分が何かする必要がある間は、画面枠を光らせる＋タブ名で知らせる＋スマホを振動
+  const mustAct = G.whoMustAct(v).includes(app.me) && v.phase !== 'ended';
+  const wasMust = prev ? G.whoMustAct(prev).includes(app.me) && prev.phase !== 'ended' : false;
+  document.body.classList.toggle('myturn', mustAct);
+  document.body.style.setProperty('--me', v.players[app.me]?.color || '#ffd75a');
+  if (mustAct && !wasMust && app.role !== 'local') { try { navigator.vibrate?.([120, 80, 120]); } catch {} if (prev && v.step !== 'roll') sfx('myTurn'); }
+  titleBlink(mustAct && app.role !== 'local');
   renderHUD();
 }
+
+let blinkT = null;
+function titleBlink(on) {
+  const base = 'HEX ISLE ～開拓の島～';
+  clearInterval(blinkT);
+  if (!on || !document.hidden) { document.title = on ? '★あなたの番！ ' + base : base; return; }
+  let f = false;
+  blinkT = setInterval(() => { f = !f; document.title = f ? '★★ あなたの番です ★★' : base; }, 900);
+}
+document.addEventListener('visibilitychange', () => app.v && titleBlink(document.body.classList.contains('myturn') && app.role !== 'local'));
 
 // -------------------------------------------------------------
 // 演出（効果音・バナー・数字ポップ）
@@ -364,7 +446,7 @@ $('chatForm').onsubmit = (e) => {
 function onPick(kind, id) {
   const v = app.v;
   if (!v) return;
-  if (v.phase === 'setup') {
+  if (v.phase === 'setup' || v.step === 'joinSetup') {
     if (kind === 'vertex') dispatch({ type: 'setupSettlement', v: id });
     if (kind === 'edge') dispatch({ type: 'setupRoad', e: id });
     return;
@@ -380,8 +462,8 @@ function updateTargets() {
   const color = v.players[me]?.color || '#fff';
   const myTurn = v.current === me && v.phase !== 'ended';
   if (!myTurn) return renderer.setTargets(null);
-  if (v.phase === 'setup') {
-    if (v.setup.step === 'settlement') return renderer.setTargets('vertex', G.legalTargets(v, me, 'settlement'), color);
+  if (v.phase === 'setup' || v.step === 'joinSetup') {
+    if ((v.phase === 'setup' ? v.setup.step : v.joinSetup.step) === 'settlement') return renderer.setTargets('vertex', G.legalTargets(v, me, 'settlement'), color);
     return renderer.setTargets('edge', G.legalTargets(v, me, 'road'), color);
   }
   if (v.step === 'robber') return renderer.setTargets('hex', G.legalTargets(v, me, 'robber'), '#ff5050');
@@ -400,22 +482,32 @@ function statusText(v) {
   const me = app.me;
   const cur = v.players[v.current];
   const mine = v.current === me;
-  const who = mine ? (app.role === 'local' ? `${cur.name}：` : 'あなたの番：') : `${cur.name} の番：`;
+  const who = '';
   if (v.phase === 'ended') return `🏆 ${v.players[v.winner].name} の勝利！`;
   if (v.phase === 'setup') {
     const round = v.setup.idx < v.players.length ? '1巡目' : '2巡目（隣接資源をもらえる）';
-    return `${who}初期配置 ${round} — ${v.setup.step === 'settlement' ? '開拓地を置く場所を選択' : '開拓地につながる街道を選択'}`;
+    return `初期配置 ${round} — ${v.setup.step === 'settlement' ? '開拓地を置く場所を選択' : '開拓地につながる街道を選択'}`;
   }
   if (v.step === 'discard') {
     const waiting = Object.keys(v.pendingDiscard).map((i) => v.players[i].name).join('、');
     return `7が出た！ 手札を半分捨てる人: ${waiting}`;
   }
+  if (v.step === 'joinSetup') return `${who}途中参加の初期配置（残り${cur.pendingSetup}回）— ${v.joinSetup.step === 'settlement' ? '開拓地を置く場所を選択' : '開拓地につながる街道を選択'}`;
   if (v.step === 'roll') return `${who}ダイスを振ってください`;
   if (v.step === 'robber') return `${who}盗賊を移動するタイルを選択`;
   if (v.step === 'steal') return `${who}資源を奪う相手を選択`;
   if (v.freeRoads > 0) return `${who}無料の街道を置く場所を選択（残り${v.freeRoads}本）`;
   if (app.buildMode) return `${who}${{ road: '街道', settlement: '開拓地', city: '都市' }[app.buildMode]}を建てる場所を選択`;
   return `${who}建設・交易・ターン終了`;
+}
+
+// ホスト用：止まっている人を飛ばすボタン（切断中なら目立たせる）
+function hostSkipHtml(v, mustAct) {
+  if (app.role !== 'host' || v.phase === 'ended' || mustAct) return '';
+  const waiting = G.whoMustAct(v).filter((p) => p !== 0);
+  if (!waiting.length) return '';
+  const off = waiting.some((p) => app.seatsOnline && !app.seatsOnline[p]);
+  return `<button id="skipBtn" class="mini ${off ? 'primary' : ''}">⏭️ ${off ? '切断中の人を' : ''}自動で進める</button>`;
 }
 
 function renderHUD() {
@@ -426,14 +518,23 @@ function renderHUD() {
   $('players').innerHTML = v.players.map((p) => {
     const isMe = p.id === me;
     const vp = p.vp ?? p.vpPublic;
-    return `<div class="pl ${p.id === v.current ? 'cur' : ''} ${online && !online[p.id] ? 'off' : ''}">
-      <div class="top"><span class="dot" style="background:${p.color}"></span>${esc(p.name)}${isMe && app.role !== 'local' ? '（あなた）' : ''}${online && !online[p.id] ? ' 📴' : ''}<span class="vp">${vp}点</span></div>
+    return `<div class="pl ${p.id === v.current ? 'cur' : ''} ${online && !online[p.id] ? 'off' : ''}" style="--pc:${p.color}">
+      <div class="top">${p.id === v.current ? '<span class="arrow">▶</span>' : ''}<span class="dot" style="background:${p.color}"></span>${esc(p.name)}${isMe && app.role !== 'local' ? '（あなた）' : ''}${online && !online[p.id] ? ' 📴' : ''}<span class="vp">${vp}点</span></div>
       <div class="stats"><span title="資源カード">🃏${p.resCount}</span><span title="発展カード">📜${p.devCount}</span><span title="使用した騎士">⚔️${p.knights}</span><span title="最長の道">🛤️${v.longestLen?.[p.id] ?? 0}</span>
       ${v.largestArmy === p.id ? '<span class="badge">最大騎士力</span>' : ''}${v.longestRoad === p.id ? '<span class="badge">最長交易路</span>' : ''}</div></div>`;
   }).join('');
 
-  $('status').textContent = statusText(v);
-  $('status').classList.toggle('me', G.whoMustAct(v).includes(me));
+  const mustAct = G.whoMustAct(v).includes(me) && v.phase !== 'ended';
+  const curP = v.players[v.current];
+  $('status').innerHTML = (mustAct
+    ? `<div class="who" style="--pc:${v.players[me].color}">🎯 ${app.role === 'local' ? esc(v.players[me].name) + ' の番' : 'あなたの番'}</div>`
+    : v.phase === 'ended' ? '' : `<div class="who wait" style="--pc:${curP.color}">⏳ <span class="dot" style="background:${curP.color}"></span>${esc(curP.name)} の番${online && !online[curP.id] ? '（📴切断中）' : ''}</div>`)
+    + `<div class="what">${esc(statusText(v))}</div>` + hostSkipHtml(v, mustAct);
+  $('status').classList.toggle('me', mustAct);
+  $('status').querySelector('#skipBtn')?.addEventListener('click', () => {
+    if (!confirm('止まっているプレイヤーの処理を自動で進めますか？\n（ダイス前なら番を飛ばし、捨て札・盗賊はランダムで処理）')) return;
+    dispatch({ type: 'forceSkip' });
+  });
 
   // ログ（新しい行だけ追加。チャットは間に挟まる）
   const fresh = v.log.filter((l) => l.id > app.lastLogId);
@@ -469,13 +570,14 @@ function renderHUD() {
   $('actions').innerHTML = v.phase === 'ended'
     ? btn('aNew', '🔁 メニューへ', true, 'primary')
     : [
-      btn('aRoll', '🎲 ダイス', myTurn && v.step === 'roll', myTurn && v.step === 'roll' ? 'primary' : ''),
+      btn('aRoll', '🎲 ダイスを振る', myTurn && v.step === 'roll', myTurn && v.step === 'roll' ? 'primary pulse' : ''),
       btn('aRoad', '🛤️ 街道', main && has(G.COST.road) && P.roadsLeft > 0, app.buildMode === 'road' ? 'on' : ''),
       btn('aSet', '🏠 開拓地', main && has(G.COST.settlement) && P.settlementsLeft > 0, app.buildMode === 'settlement' ? 'on' : ''),
       btn('aCity', '🏰 都市', main && has(G.COST.city) && P.citiesLeft > 0, app.buildMode === 'city' ? 'on' : ''),
       btn('aDev', `📜 発展(${v.devDeckCount})`, main && has(G.COST.dev) && v.devDeckCount > 0),
       btn('aTrade', '🤝 交易', main),
       btn('aEnd', '⏭️ ターン終了', main, main ? 'primary' : ''),
+      ...(v.step === 'joinSetup' && myTurn ? [] : []),
     ].join('');
   const on = (id, f) => { const b = $(id); if (b) b.onclick = f; };
   on('aRoll', () => dispatch({ type: 'roll' }));
@@ -486,7 +588,7 @@ function renderHUD() {
   on('aDev', () => dispatch({ type: 'buyDev' }));
   on('aTrade', openTrade);
   on('aEnd', () => { app.buildMode = null; dispatch({ type: 'endTurn' }); });
-  on('aNew', () => { store.del('hexisle-host'); location.href = location.pathname; });
+  on('aNew', () => { store.del('hexisle-host'); store.del('hexisle-joined'); location.href = location.pathname; });
 
   renderTradeBanner();
   updateTargets();
